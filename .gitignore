@@ -6,7 +6,6 @@ dist/
 .env
 .DS_Store
 
-google-services.json
 *.keystore
 *-service-account*.json
 *serviceAccount*.json
