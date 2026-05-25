@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.expo/
+*.db
+*.log
+.env
+.DS_Store
+
+google-services.json
+*.keystore
+*-service-account*.json
+*serviceAccount*.json
+.env
+.expo
+

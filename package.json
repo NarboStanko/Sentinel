@@ -1,0 +1,7 @@
+{
+  "name": "sentinella",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Dead man's switch civico, end-to-end encrypted",
+  "workspaces": ["server", "app"]
+}

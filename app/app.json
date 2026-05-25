@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "Sentinella",
+    "slug": "sentinella",
+    "scheme": "sentinella",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Per scansionare il QR di un contatto di persona."
+        }
+      ],
+      "expo-notifications"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "org.sentinella.app"
+    },
+    "android": {
+      "package": "org.sentinella.app",
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "extra": {
+      "serverUrl": "http://localhost:4000",
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "dbeff2e7-7c92-4f90-bc87-7280d28c2ab7"
+      }
+    },
+    "owner": "narbo"
+  }
+}

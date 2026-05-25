@@ -1,0 +1,91 @@
+// SQLite store. PRINCIPIO: nessun plaintext, nessuna DEK, nessun contenuto.
+// Il server conserva solo: utenti, contatti (chiavi pubbliche + push token),
+// switch + stato, puntatori al drive e QUOTE CIFRATE della chiave.
+import Database from 'better-sqlite3';
+
+export const db = new Database(process.env.DB_PATH ?? 'sentinella.db');
+db.pragma('journal_mode = WAL');
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  display_name TEXT,
+  public_key TEXT NOT NULL,        -- chiave pubblica del proprietario (JWK/hex)
+  push_token TEXT,
+  recovery_k INTEGER DEFAULT 2,        -- quorum per il recovery sociale
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS invites (
+  token TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  owner_public_key TEXT NOT NULL,
+  used INTEGER DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+
+-- Un contatto fidato di un owner. 'to_hash' offusca l'identità lato server.
+CREATE TABLE IF NOT EXISTS contacts (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  public_key TEXT NOT NULL,         -- chiave pubblica del contatto
+  push_token TEXT,
+  to_hash TEXT NOT NULL,            -- hash opaco per i log (no nomi/ruoli sul server)
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS switches (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  state TEXT NOT NULL,              -- DISARMED|ACTIVE|GRACE|APPROVAL_PENDING|RELEASED
+  interval_sec INTEGER NOT NULL,
+  grace_sec INTEGER NOT NULL,
+  drive_pointer TEXT,              -- es. drive://... o https URL al blob CIFRATO
+  content_iv TEXT,                 -- IV del contenuto (non sensibile da solo)
+  last_checkin INTEGER,
+  next_check_at INTEGER,
+  armed_at INTEGER
+);
+
+-- Quote Shamir CIFRATE e OPACHE. Nessun contact_id: il server non sa a chi
+-- appartenga ciascuna quota. Tra le reali sono mescolate delle ESCHE (decoy)
+-- indistinguibili, cosi' il server non conosce neppure N reale ne' k.
+-- Il contatto trova la propria per trial decryption (prova ad aprirle tutte).
+CREATE TABLE IF NOT EXISTS shares (
+  id TEXT PRIMARY KEY,
+  switch_id TEXT NOT NULL,
+  x INTEGER NOT NULL,              -- indice Shamir (anche le esche ne hanno uno)
+  blob TEXT NOT NULL,              -- blob opaco (quota reale o esca, identici a vista)
+  submitted_share TEXT             -- quota decifrata reinviata dal contatto al rilascio
+);
+
+-- RECOVERY SOCIALE (fail-safe): rotazione identita' sotto quorum + ritardo.
+-- Non disarma, non rilascia: cambia solo la chiave pubblica del proprietario.
+CREATE TABLE IF NOT EXISTS recoveries (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  new_public_key TEXT NOT NULL,
+  unlock_at INTEGER NOT NULL,          -- finalizzabile solo dopo questo istante
+  finalized INTEGER DEFAULT 0,
+  cancelled INTEGER DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS recovery_approvals (
+  recovery_id TEXT NOT NULL,
+  contact_public_key TEXT NOT NULL,    -- contatto che approva (firma verificata)
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (recovery_id, contact_public_key)
+);
+
+CREATE TABLE IF NOT EXISTS audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  switch_id TEXT,
+  event TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+`);
+
+export function audit(switchId: string | null, event: string) {
+  db.prepare('INSERT INTO audit (switch_id, event, at) VALUES (?,?,?)')
+    .run(switchId, event, Date.now());
+}

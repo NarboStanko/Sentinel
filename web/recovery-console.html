@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentinella — Recupero via browser</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#F6F4EF;--surface:#fff;--alt:#EFEDE6;--ink:#1B1D1A;--dim:#5C5F58;--faint:#9A9D94;
+    --line:#E2DFD6;--safe:#3E8E72;--safeSoft:#E4F0EA;--heart:#C8881F;--heartSoft:#F7EBD3;
+    --danger:#C0492F;--dangerSoft:#F6E3DD;--mono:'JetBrains Mono',monospace;--serif:'Newsreader',Georgia,serif;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--serif);line-height:1.55}
+  .wrap{max-width:560px;margin:0 auto;padding:48px 22px 80px}
+  h1{font-size:30px;font-weight:600;letter-spacing:-.4px;margin:0}
+  .tag{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--faint);margin:8px 0 28px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:24px;margin-bottom:18px}
+  .card.safe{background:var(--safeSoft);border-color:#cfe4da}
+  .card.heart{background:var(--heartSoft);border-color:#ecd9b0}
+  .card.danger{background:var(--dangerSoft);border-color:#eccabf}
+  h2{font-size:18px;font-weight:600;margin:0 0 6px}
+  p{color:var(--dim);font-size:15px;margin:0 0 14px}
+  label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--faint);margin:0 0 6px}
+  textarea,input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:12px;
+    padding:12px;font-family:var(--mono);font-size:13px;color:var(--ink);outline:none;line-height:1.6}
+  textarea:focus,input:focus{border-color:var(--safe)}
+  textarea{min-height:84px;resize:vertical}
+  .field{margin-bottom:14px}
+  button{font-family:var(--mono);font-size:13px;font-weight:600;border:none;border-radius:12px;
+    padding:13px 18px;cursor:pointer;width:100%;margin-top:8px;transition:filter .15s,transform .08s}
+  button:hover{filter:brightness(.95)}button:active{transform:translateY(1px)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .b-ink{background:var(--ink);color:#fff}.b-safe{background:var(--safe);color:#fff}
+  .b-danger{background:var(--danger);color:#fff}.b-ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:1px;
+    padding:4px 10px;border-radius:999px;margin-bottom:10px}
+  .pill.safe{background:var(--safeSoft);color:var(--safe)}.pill.heart{background:var(--heartSoft);color:var(--heart)}
+  .pill.danger{background:var(--dangerSoft);color:var(--danger)}.pill.neutral{background:var(--alt);color:var(--dim)}
+  .mono{font-family:var(--mono);font-size:12px;color:var(--faint);word-break:break-all}
+  .note{font-size:13px;color:var(--faint);border-left:2px solid var(--line);padding-left:12px;margin-top:14px}
+  .big{font-size:40px;font-weight:700;letter-spacing:-1px;margin:6px 0}
+  .err{color:var(--danger);font-size:13px;font-family:var(--mono);margin-top:8px}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Sentinella</h1>
+  <div class="tag">Recupero via browser</div>
+
+  <!-- LOGIN -->
+  <div id="login">
+    <div class="card">
+      <h2>Hai perso il telefono?</h2>
+      <p>La tua identità non era nel telefono: è nelle 12 parole. Inseriscile qui per riprendere
+         il controllo dello switch da questo browser. Le parole non lasciano mai questa pagina —
+         qui dentro firmano soltanto una sfida del server.</p>
+      <div class="field">
+        <label>Indirizzo del server</label>
+        <input id="server" value="http://localhost:4000" spellcheck="false">
+      </div>
+      <div class="field">
+        <label>La tua seed phrase (12 parole)</label>
+        <textarea id="seed" placeholder="parola1 parola2 … parola12" spellcheck="false" autocomplete="off"></textarea>
+      </div>
+      <button class="b-ink" id="loginBtn">Accedi con la seed</button>
+      <div class="err" id="loginErr"></div>
+      <div class="note">Sicurezza: la pagina deriva la chiave localmente e invia al server solo una
+        firma. Per il caso peggiore (persa anche la seed) serve il recovery sociale dei contatti.</div>
+    </div>
+  </div>
+
+  <!-- CONSOLE -->
+  <div id="console" class="hidden">
+    <div class="card">
+      <div class="mono" id="who"></div>
+    </div>
+    <div id="switches"></div>
+    <button class="b-ghost" id="logoutBtn">Esci</button>
+  </div>
+</div>
+
+<script type="module">
+// Stessa derivazione dell'app: PBKDF2-SHA512 (come BIP39) -> sha256 -> scalare P-256.
+// Niente dipendenze: P-256 in BigInt + Web Crypto per PBKDF2/SHA/ECDSA.
+const $ = (id) => document.getElementById(id);
+const enc = new TextEncoder();
+const hex = (u8) => [...u8].map(b => b.toString(16).padStart(2, '0')).join('');
+
+const P = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffffn;
+const A = 0xffffffff00000001000000000000000000000000fffffffffffffffffffffffcn;
+const Gx = 0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296n;
+const Gy = 0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5n;
+const N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
+const mod = (x, m) => { let r = x % m; return r < 0n ? r + m : r; };
+function inv(a, m){ let [or, r] = [mod(a, m), m], [os, s] = [1n, 0n]; while (r){ const q = or / r; [or, r] = [r, or - q * r]; [os, s] = [s, os - q * s]; } return mod(os, m); }
+function dbl(Pt){ if(!Pt) return null; const l = mod((3n*Pt.x*Pt.x + A) * inv(2n*Pt.y, P), P); const x = mod(l*l - 2n*Pt.x, P); return { x, y: mod(l*(Pt.x - x) - Pt.y, P) }; }
+function add(a, b){ if(!a) return b; if(!b) return a; if(a.x === b.x){ if(mod(a.y + b.y, P) === 0n) return null; return dbl(a); } const l = mod((b.y - a.y) * inv(mod(b.x - a.x, P), P), P); const x = mod(l*l - a.x - b.x, P); return { x, y: mod(l*(a.x - x) - a.y, P) }; }
+function mul(k, Pt){ let R = null, Nn = Pt; k = mod(k, N); while (k > 0n){ if (k & 1n) R = add(R, Nn); Nn = dbl(Nn); k >>= 1n; } return R; }
+const toHex32 = (x) => x.toString(16).padStart(64, '0');
+const toBytes32 = (x) => { const h = toHex32(x); const b = new Uint8Array(32); for (let i=0;i<32;i++) b[i]=parseInt(h.substr(i*2,2),16); return b; };
+const b64url = (u8) => btoa(String.fromCharCode(...u8)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+
+async function deriveIdentity(mnemonic){
+  const norm = mnemonic.trim().toLowerCase().normalize('NFKD');
+  const km = await crypto.subtle.importKey('raw', enc.encode(norm), 'PBKDF2', false, ['deriveBits']);
+  const seedBuf = await crypto.subtle.deriveBits({ name:'PBKDF2', salt: enc.encode('mnemonic'), iterations: 2048, hash: 'SHA-512' }, km, 512);
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', seedBuf));
+  let s = BigInt('0x' + hex(h));
+  const scalar = (s % (N - 1n)) + 1n;
+  const Q = mul(scalar, { x: Gx, y: Gy });
+  const pubCompressed = ((Q.y & 1n) ? '03' : '02') + toHex32(Q.x);
+  // chiave per firmare (ECDSA) — non esce dalla pagina
+  const jwk = { kty:'EC', crv:'P-256', d: b64url(toBytes32(scalar)), x: b64url(toBytes32(Q.x)), y: b64url(toBytes32(Q.y)), ext:true };
+  const signKey = await crypto.subtle.importKey('jwk', jwk, { name:'ECDSA', namedCurve:'P-256' }, false, ['sign']);
+  return { pubCompressed, signKey };
+}
+
+let session = null; // { server, token, ownerId, signKey, pub }
+
+async function api(server, path, method='GET', body){
+  const res = await fetch(server + path, { method, headers: { 'content-type':'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) throw new Error(method + ' ' + path + ' -> ' + res.status);
+  return res.json();
+}
+
+$('loginBtn').onclick = async () => {
+  $('loginErr').textContent = '';
+  const server = $('server').value.trim();
+  const seed = $('seed').value.trim();
+  if (seed.split(/\s+/).length !== 12){ $('loginErr').textContent = 'Servono 12 parole.'; return; }
+  try {
+    const id = await deriveIdentity(seed);
+    const { nonce } = await api(server, '/auth/challenge', 'POST', { publicKey: id.pubCompressed });
+    const sigBuf = await crypto.subtle.sign({ name:'ECDSA', hash:'SHA-256' }, id.signKey, enc.encode(nonce));
+    const sig = hex(new Uint8Array(sigBuf));
+    const r = await api(server, '/auth/verify', 'POST', { publicKey: id.pubCompressed, nonce, sig });
+    if (!r.ok){ $('loginErr').textContent = r.reason ?? 'accesso non riuscito'; return; }
+    session = { server, token: r.token, ownerId: r.ownerId, signKey: id.signKey, pub: id.pubCompressed };
+    $('seed').value = ''; // non tenerla in memoria piu' del necessario
+    renderConsole(r.switches);
+  } catch (e){ $('loginErr').textContent = 'Errore: ' + e.message + ' (server raggiungibile?)'; }
+};
+
+const STATE = {
+  ACTIVE:['ARMATO','safe'], GRACE:['IN ATTESA DI RISPOSTA','heart'],
+  APPROVAL_PENDING:['APPROVAZIONE IN CORSO','danger'], RELEASED:['RILASCIATO','danger'], DISARMED:['DISARMATO','neutral'],
+};
+
+function renderConsole(switches){
+  $('login').classList.add('hidden');
+  $('console').classList.remove('hidden');
+  $('who').textContent = 'Identità: ' + session.pub.slice(0, 26) + '…  ·  owner ' + session.ownerId;
+  const box = $('switches');
+  if (!switches || !switches.length){ box.innerHTML = '<div class="card"><p>Nessuno switch su questo account.</p></div>'; return; }
+  box.innerHTML = '';
+  for (const sw of switches){
+    const [label, tone] = STATE[sw.state] ?? ['?','neutral'];
+    const armed = sw.state !== 'DISARMED' && sw.state !== 'RELEASED';
+    const div = document.createElement('div');
+    div.className = 'card ' + (tone === 'neutral' ? '' : tone);
+    div.innerHTML = `<span class="pill ${tone}">${label}</span>
+      <h2>Switch</h2>
+      <div class="mono">${sw.id} · intervallo ${sw.interval_sec}s · grazia ${sw.grace_sec}s · soglia ${sw.threshold_k}</div>`;
+    if (armed){
+      const ok = document.createElement('button'); ok.className='b-safe'; ok.textContent='Tutto ok (resetta il battito)';
+      ok.onclick = () => act(sw.id, '/checkin/respond');
+      const off = document.createElement('button'); off.className='b-danger'; off.textContent='Blocca e disarma lo switch';
+      off.onclick = () => { if (confirm('Disarmare lo switch? Smetterà di proteggere finché non lo riarmi.')) act(sw.id, '/switch/disarm'); };
+      div.append(ok, off);
+    } else {
+      const p = document.createElement('p'); p.textContent = 'Lo switch non è attivo.'; div.append(p);
+    }
+    box.append(div);
+  }
+}
+
+async function act(switchId, path){
+  try { await api(session.server, path, 'POST', { switchId });
+    const r = await api(session.server, '/auth/verify', 'POST', await reAuth());
+    renderConsole(r.switches);
+  } catch (e){ alert('Errore: ' + e.message); }
+}
+// ri-firma per riottenere lo stato aggiornato (sessione breve)
+async function reAuth(){
+  const { nonce } = await api(session.server, '/auth/challenge', 'POST', { publicKey: session.pub });
+  const sigBuf = await crypto.subtle.sign({ name:'ECDSA', hash:'SHA-256' }, session.signKey, enc.encode(nonce));
+  return { publicKey: session.pub, nonce, sig: hex(new Uint8Array(sigBuf)) };
+}
+
+$('logoutBtn').onclick = () => { session = null; $('console').classList.add('hidden'); $('login').classList.remove('hidden'); };
+</script>
+</body>
+</html>
