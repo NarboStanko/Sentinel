@@ -1,3 +1,4 @@
+import 'react-native-get-random-values';
 import { useEffect, useRef } from 'react';
 import { Stack, router } from 'expo-router';
 import * as Notifications from 'expo-notifications';
