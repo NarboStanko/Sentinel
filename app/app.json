@@ -15,7 +15,8 @@
           "cameraPermission": "Per scansionare il QR di un contatto di persona."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "expo-web-browser"
     ],
     "ios": {
       "supportsTablet": true,
@@ -36,7 +37,9 @@
       },
       "eas": {
         "projectId": "dbeff2e7-7c92-4f90-bc87-7280d28c2ab7"
-      }
+      },
+      "googleDriveClientIdIos":     "PLACEHOLDER_IOS.apps.googleusercontent.com",
+      "googleDriveClientIdAndroid": "PLACEHOLDER_ANDROID.apps.googleusercontent.com"
     },
     "owner": "narbo"
   }

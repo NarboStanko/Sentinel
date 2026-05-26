@@ -60,20 +60,26 @@ export default function Approve() {
     })();
   }, [paramSwitchId]);
 
-  // prova a ricostruire dalle quote raccolte; se decifra, la soglia è raggiunta
-  async function tryReconstruct(
-    collected: { x: number; y: string }[],
-    pointer: string,
-    iv: string
-  ) {
+  // prova a ricostruire dalle quote raccolte; se decifra, la soglia è raggiunta.
+  // FLUSSO: ricostruisce DEK → segnala rilascio → recupera puntatore (ora disponibile) → decifra.
+  // Il server non conosce k; la verifica reale è nella cifratura (AEAD fallisce con DEK errata).
+  async function tryReconstruct(collected: { x: number; y: string }[]) {
     if (collected.length < 2) return false;
     try {
       const dek = combineSecret(collected.map(shareFromWire));
-      const ctHex = await downloadEncrypted(pointer);
-      const plain = decryptContent(dek, iv, ctHex);
+
+      // Segnala il rilascio: il server transisce a RELEASED e sblocca il drivePointer.
+      // Se la soglia non è ancora raggiunta la decifratura fallirà nel catch.
+      try { await api.releaseConfirm(switchId!); } catch { /* già RELEASED o rete */ }
+
+      // Il drivePointer è ora accessibile (stato RELEASED)
+      const released = await api.approvalRequest(switchId!);
+      if (!released.drivePointer) return false;
+
+      const ctHex = await downloadEncrypted(released.drivePointer);
+      const plain = decryptContent(dek, released.contentIv, ctHex);
       const manifest = JSON.parse(new TextDecoder().decode(plain));
       setContent(manifest.text ?? '(nessun messaggio)');
-      await api.releaseConfirm(switchId!);
       setStatus('Soglia raggiunta — documentazione rilasciata');
       return true;
     } catch { return false; }
@@ -98,7 +104,7 @@ export default function Approve() {
       switchId,
       { x: mine.x, y: bytesToHex(mine.y) }
     );
-    const done = await tryReconstruct(collected, req.drivePointer, req.contentIv);
+    const done = await tryReconstruct(collected);
     if (!done) {
       setStatus(`Quota registrata. In attesa di altre approvazioni (raccolte: ${collected.length}).`);
     }

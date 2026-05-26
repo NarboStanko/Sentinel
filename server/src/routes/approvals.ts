@@ -15,8 +15,17 @@ export async function approvalRoutes(app: FastifyInstance) {
     const submitted = db.prepare(
       'SELECT COUNT(*) AS n FROM shares WHERE switch_id = ? AND submitted_share IS NOT NULL'
     ).get(req.query.switchId) as { n: number };
-    return { pending: sw.state === 'APPROVAL_PENDING', released: sw.state === 'RELEASED',
-      approvedCount: submitted.n, drivePointer: sw.drive_pointer, contentIv: sw.content_iv };
+    // drivePointer viene esposto SOLO dopo il rilascio confermato (RELEASED).
+    // Prima di quel momento i contatti hanno le quote ma non il blob:
+    // la sicurezza è nella cifratura, questo gate aggiunge una barriera intenzionale.
+    const released = sw.state === 'RELEASED';
+    return {
+      pending:      sw.state === 'APPROVAL_PENDING',
+      released,
+      approvedCount: submitted.n,
+      drivePointer: released ? sw.drive_pointer : undefined,
+      contentIv:    released ? sw.content_iv    : undefined,
+    };
   });
 
   // Tutti i blob opachi (reali + esche) per la trial decryption. Solo durante l'attesa.
