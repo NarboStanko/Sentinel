@@ -48,7 +48,6 @@ export async function registerPushToken(
 
   try {
     const token = await Notifications.getExpoPushTokenAsync({ projectId });
-    console.log('PUSH_TOKEN >>>', token.data);
     await api.registerPush(role, id, token.data);
   } catch (e) {
     console.warn('[notifications] registrazione token fallita:', e);
