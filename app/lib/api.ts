@@ -3,13 +3,28 @@ import Constants from 'expo-constants';
 const BASE =
   (Constants.expoConfig?.extra?.serverUrl as string) ?? 'http://localhost:4000';
 
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function req<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const res = await fetch(BASE + path, {
     method,
     headers: { 'content-type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(`${method} ${path} -> ${res.status}`);
+  if (!res.ok) {
+    let message = `${method} ${path} → ${res.status}`;
+    try {
+      const json = await res.json() as Record<string, unknown>;
+      if (typeof json['message'] === 'string') message = json['message'];
+      else if (typeof json['error'] === 'string') message = json['error'];
+    } catch { /* body non è JSON, usa il messaggio di default */ }
+    throw new ApiError(res.status, message);
+  }
   return res.json() as Promise<T>;
 }
 

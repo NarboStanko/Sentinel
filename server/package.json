@@ -7,7 +7,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "test:push": "tsx src/services/pushSender.test.ts"
+    "test:push": "tsx src/services/pushSender.test.ts",
+    "test:routes": "tsx src/routes/pairing.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

@@ -86,6 +86,8 @@ export default function Compose() {
       }
       await api.arm({ switchId, drivePointer, contentIv: nonce, shares: wire });
       router.replace('/home');
+    } catch (e: any) {
+      alert('Errore durante l\'armo: ' + (e?.message ?? 'Errore sconosciuto'));
     } finally { setBusy(false); }
   }
 

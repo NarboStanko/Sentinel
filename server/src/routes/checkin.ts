@@ -6,10 +6,10 @@ export function withJitter(sec: number) { return Math.round(sec * (0.85 + Math.r
 
 // L'app risponde «tutto ok» a una push o all'apertura. Resetta il battito.
 export async function checkinRoutes(app: FastifyInstance) {
-  app.post<{ Body: { switchId: string } }>('/checkin/respond', async (req) => {
+  app.post<{ Body: { switchId: string } }>('/checkin/respond', async (req, reply) => {
     const sw = db.prepare('SELECT interval_sec, state FROM switches WHERE id = ?')
       .get(req.body.switchId) as { interval_sec: number; state: string } | undefined;
-    if (!sw) throw new Error('switch non trovato');
+    if (!sw) return reply.code(404).send({ error: 'switch_non_trovato', message: 'Switch non trovato.' });
     if (sw.state === 'RELEASED') return { ok: false, reason: 'gia rilasciato' };
     const now = Date.now();
     const next = now + withJitter(sw.interval_sec) * 1000; // jitter: il pattern non e' un orologio

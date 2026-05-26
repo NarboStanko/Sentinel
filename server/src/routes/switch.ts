@@ -26,12 +26,12 @@ export async function switchRoutes(app: FastifyInstance) {
       contentIv: string;
       shares: { x: number; blob: string }[]; // opache: reali + esche, mescolate dal client
     };
-  }>('/switch/arm', async (req) => {
+  }>('/switch/arm', async (req, reply) => {
     const { switchId, drivePointer, contentIv, shares } = req.body;
     const now = Date.now();
     const sw = db.prepare('SELECT interval_sec FROM switches WHERE id = ?').get(switchId) as
       | { interval_sec: number } | undefined;
-    if (!sw) throw new Error('switch non trovato');
+    if (!sw) return reply.code(404).send({ error: 'switch_non_trovato', message: 'Switch non trovato.' });
 
     db.prepare('DELETE FROM shares WHERE switch_id = ?').run(switchId);
     const ins = db.prepare('INSERT INTO shares (id, switch_id, x, blob) VALUES (?,?,?,?)');

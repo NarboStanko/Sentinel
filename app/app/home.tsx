@@ -36,8 +36,12 @@ export default function Home() {
 
   async function tuttoOk() {
     if (!switchId) return;
-    await api.checkin(switchId);
-    refresh();
+    try {
+      await api.checkin(switchId);
+      refresh();
+    } catch (e: any) {
+      alert('Errore nel check-in: ' + (e?.message ?? 'Errore sconosciuto'));
+    }
   }
 
   const meta = STATE_LABEL[sw?.state ?? 'DISARMED'];

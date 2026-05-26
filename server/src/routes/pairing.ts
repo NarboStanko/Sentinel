@@ -21,10 +21,10 @@ export async function pairingRoutes(app: FastifyInstance) {
   );
 
   // L'owner genera un invito monouso
-  app.post<{ Body: { ownerId: string } }>('/invite', async (req) => {
+  app.post<{ Body: { ownerId: string } }>('/invite', async (req, reply) => {
     const owner = db.prepare('SELECT public_key FROM users WHERE id = ?').get(req.body.ownerId) as
       | { public_key: string } | undefined;
-    if (!owner) throw new Error('owner not found');
+    if (!owner) return reply.code(404).send({ error: 'owner_non_trovato', message: 'Owner non trovato.' });
     const token = nanoid(16);
     db.prepare('INSERT INTO invites (token, owner_id, owner_public_key, created_at) VALUES (?,?,?,?)')
       .run(token, req.body.ownerId, owner.public_key, Date.now());
@@ -35,10 +35,10 @@ export async function pairingRoutes(app: FastifyInstance) {
   // Il contatto completa l'accoppiamento dopo aver scansionato il QR
   app.post<{ Body: { token: string; contactPublicKey: string; pushToken?: string } }>(
     '/pair',
-    async (req) => {
+    async (req, reply) => {
       const inv = db.prepare('SELECT * FROM invites WHERE token = ? AND used = 0').get(req.body.token) as
         | { owner_id: string } | undefined;
-      if (!inv) throw new Error('invito non valido o gia usato');
+      if (!inv) return reply.code(404).send({ error: 'invito_non_valido', message: 'Invito non valido o già usato.' });
       const contactId = 'c_' + nanoid(10);
       const toHash = createHash('sha256').update('salt::' + contactId).digest('base64').slice(0, 16);
       db.prepare(

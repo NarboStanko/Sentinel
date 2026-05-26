@@ -89,11 +89,19 @@ export default function AddFriend() {
   // ── CONTATTO passo 3: conferma → chiama /pair → registra push token ───────
   async function contactConfirm() {
     if (!qrB) return;
-    const { contactId } = await api.pair(qrB.token, qrB.contactPublicKey);
-    // Registra il push token subito dopo il pairing: il server potrà notificare
-    // questo contatto quando scatta una richiesta di approvazione.
-    registerPushToken('contact', contactId).catch(() => {});
-    setStep('done');
+    try {
+      const { contactId } = await api.pair(qrB.token, qrB.contactPublicKey);
+      // Registra il push token subito dopo il pairing: il server potrà notificare
+      // questo contatto quando scatta una richiesta di approvazione.
+      registerPushToken('contact', contactId).catch(() => {});
+      setStep('done');
+    } catch (e: any) {
+      if (e?.status === 404) {
+        alert('Invito non valido o già usato. Chiedi all\'owner un nuovo QR reale (i QR demo non funzionano).');
+      } else {
+        alert('Errore durante il pairing: ' + (e?.message ?? 'Errore sconosciuto'));
+      }
+    }
   }
 
   // ── RENDER ────────────────────────────────────────────────────────────────

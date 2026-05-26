@@ -15,6 +15,14 @@ import { startScheduler } from './services/scheduler.js';
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
 
+// Logga sempre lo stack server-side; espone solo un messaggio sicuro al client.
+// Le route devono usare reply.code(4xx).send({error,message}) per errori di input,
+// non throw — questo handler è per bug inattesi.
+app.setErrorHandler((err, _req, reply) => {
+  app.log.error(err);
+  reply.code(500).send({ error: 'internal_error', message: 'Errore interno del server.' });
+});
+
 app.get('/health', async () => ({ ok: true, service: 'sentinella', ts: Date.now() }));
 
 await app.register(authRoutes);
