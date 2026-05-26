@@ -15,8 +15,7 @@
           "cameraPermission": "Per scansionare il QR di un contatto di persona."
         }
       ],
-      "expo-notifications",
-      "expo-web-browser"
+      "expo-notifications"
     ],
     "ios": {
       "supportsTablet": true,

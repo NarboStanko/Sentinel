@@ -5,6 +5,17 @@ import * as Notifications from 'expo-notifications';
 import { colors } from '../theme';
 import { setupNotificationChannel, registerPushToken } from '../lib/notifications';
 import { loadOwnerId, loadIdentity } from '../lib/keystore';
+import { setActiveProvider } from '../lib/storage';
+import { DevBlobProvider } from '../lib/storage/devBlob';
+
+// Provider di storage inizializzato a livello di modulo (prima di qualsiasi render).
+// Dev: DevBlobProvider attivo di default — nessuna azione manuale richiesta.
+// Produzione: nessun default; GoogleDriveProvider va attivato dopo che l'utente
+// ha completato l'OAuth (chiama setActiveProvider(new GoogleDriveProvider()) dopo
+// provider.authorize() nella schermata di configurazione storage).
+if (__DEV__) {
+  setActiveProvider(new DevBlobProvider());
+}
 
 // Handler globale: mostra la notifica anche se l'app è in foreground.
 // Deve essere registrato prima che qualunque notifica arrivi.
