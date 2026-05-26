@@ -8,7 +8,10 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "test:push": "tsx src/services/pushSender.test.ts",
-    "test:routes": "tsx src/routes/pairing.test.ts"
+    "test:routes": "tsx src/routes/pairing.test.ts",
+    "test:scheduler": "tsx src/services/scheduler.test.ts",
+    "test:debug": "tsx src/routes/debug.test.ts",
+    "test:switch": "tsx src/routes/switch.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

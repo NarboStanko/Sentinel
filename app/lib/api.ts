@@ -68,4 +68,13 @@ export const api = {
     req<{ switches: { switchId: string; ownerName: string }[] }>(
       `/pending?pub=${encodeURIComponent(pub)}&ts=${ts}&sig=${encodeURIComponent(sig)}`
     ),
+
+  // ── SOLO SVILUPPO (NODE_ENV !== 'production' lato server) ─────────────────
+  // Crea 2 contatti fittizi sul server e restituisce le loro chiavi pubbliche.
+  // L'app le salva come "verificate" solo per superare il controllo compose.
+  // Le quote cifrate verso questi contatti non saranno mai decifrabili.
+  seedContacts: (ownerId: string) =>
+    req<{ contacts: { contactId: string; publicKey: string }[] }>(
+      '/debug/seed-contacts', 'POST', { ownerId }
+    ),
 };

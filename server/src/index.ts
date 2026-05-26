@@ -10,6 +10,7 @@ import { recoveryRoutes } from './routes/recovery.js';
 import { pushRoutes } from './routes/push.js';
 import { pendingRoutes } from './routes/pending.js';
 import { devBlobRoutes } from './routes/devblob.js';
+import { debugRoutes } from './routes/debug.js';
 import { startScheduler } from './services/scheduler.js';
 
 const app = Fastify({ logger: true });
@@ -35,6 +36,7 @@ await app.register(approvalRoutes);
 await app.register(pushRoutes);
 await app.register(pendingRoutes);
 await app.register(devBlobRoutes); // dev only
+await app.register(debugRoutes);  // dev only (no-op in production)
 
 // IL BATTITO sta qui, non sul telefono.
 startScheduler(app.log);

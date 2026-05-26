@@ -4,40 +4,72 @@ import { router, useFocusEffect } from 'expo-router';
 import { Screen, Card, Button, T } from '../components/ui';
 import { colors, space, radius } from '../theme';
 import { api } from '../lib/api';
-import { loadOwnerId, loadSwitchId, saveSwitchId, loadVerifiedContactKeys } from '../lib/keystore';
+import { loadOwnerId, loadSwitchId, saveSwitchId, loadVerifiedContactKeys, saveVerifiedContactKey } from '../lib/keystore';
 import { encryptContent, splitSecret, sealShare, makeDecoy, hexToBytes } from '../lib/crypto';
 import { uploadEncrypted } from '../lib/drive';
+import { toSeconds, formatDuration, INTERVAL_PRESETS, PROD_LIMITS, DEV_LIMITS, type TimeUnit, type Preset } from '../lib/timing';
+
+type PresetId = Preset['id'];
 
 export default function Compose() {
   const [text, setText] = useState('');
   const [contacts, setContacts] = useState<any[]>([]);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [k, setK] = useState('2');
-  const [interval, setIntervalSec] = useState('60');
-  const [grace, setGrace] = useState('30');
+  const [intervalPreset, setIntervalPreset] = useState<PresetId>('daily');
+  const [customINum, setCustomINum] = useState('1');
+  const [customIUnit, setCustomIUnit] = useState<TimeUnit>('hours');
+  const [graceNum, setGraceNum] = useState('6');
+  const [graceUnit, setGraceUnit] = useState<TimeUnit>('hours');
   const [busy, setBusy] = useState(false);
   const [verifiedKeys, setVerifiedKeys] = useState<Set<string>>(new Set());
 
-  useFocusEffect(useCallback(() => {
-    (async () => {
-      const ownerId = await loadOwnerId();
-      if (ownerId) {
-        const [{ contacts: cs }, vk] = await Promise.all([
-          api.contacts(ownerId),
-          loadVerifiedContactKeys(),
-        ]);
-        setContacts(cs);
-        setChosen(new Set(cs.map((c: any) => c.id)));
-        setVerifiedKeys(vk);
+  const loadContacts = useCallback(async () => {
+    const ownerId = await loadOwnerId();
+    if (!ownerId) return;
+    const [{ contacts: cs }, vk] = await Promise.all([
+      api.contacts(ownerId),
+      loadVerifiedContactKeys(),
+    ]);
+    setContacts(cs);
+    setChosen(new Set(cs.map((c: any) => c.id)));
+    setVerifiedKeys(vk);
+  }, []);
+
+  useFocusEffect(useCallback(() => { loadContacts(); }, [loadContacts]));
+
+  // ── DEV ONLY ───────────────────────────────────────────────────────────────
+  // Crea 2 contatti fittizi sul server e li salva come "verificati" sul client
+  // così l'armo con k=2 è possibile senza un pairing reale con due dispositivi.
+  // ATTENZIONE: le quote cifrate verso questi contatti non sono decifrabili.
+  // Serve SOLO per testare il ciclo armo → scheduler → push check-in.
+  async function devSeedContacts() {
+    const ownerId = await loadOwnerId();
+    if (!ownerId) { alert('Nessun ownerId — completa prima l\'onboarding.'); return; }
+    try {
+      const { contacts: seeded } = await api.seedContacts(ownerId);
+      for (const c of seeded) {
+        await saveVerifiedContactKey(c.publicKey);
       }
-    })();
-  }, []));
+      await loadContacts();
+      alert(`[DEV] ${seeded.length} contatti test creati.\nNon verificati di persona — solo per testare la push check-in.`);
+    } catch (e: any) {
+      alert('[DEV] Errore seed: ' + (e?.message ?? e));
+    }
+  }
 
   function toggle(id: string) {
     const next = new Set(chosen);
     next.has(id) ? next.delete(id) : next.add(id);
     setChosen(next);
   }
+
+  const limits = __DEV__ ? DEV_LIMITS : PROD_LIMITS;
+
+  const intervalSec = intervalPreset !== 'custom'
+    ? INTERVAL_PRESETS.find(p => p.id === intervalPreset)!.seconds
+    : toSeconds(parseInt(customINum) || 0, customIUnit);
+  const graceSec = toSeconds(parseInt(graceNum) || 0, graceUnit);
 
   const kNum = parseInt(k) || 0;
   const N = chosen.size;
@@ -55,10 +87,20 @@ export default function Compose() {
       ? `Con k=${kNum} su N=${N}, perdere anche un solo contatto rende il rilascio impossibile. Idealmente N ≥ k+2 (aggiungi almeno 2 contatti di scorta).`
       : null;
 
+  const timeError: string | null =
+    intervalSec < limits.intervalMin
+      ? `Intervallo minimo: ${formatDuration(limits.intervalMin)}.`
+      : intervalSec > limits.intervalMax
+        ? `Intervallo massimo: ${formatDuration(limits.intervalMax)}.`
+        : graceSec < limits.graceMin
+          ? `Grazia minima: ${formatDuration(limits.graceMin)}.`
+          : null;
+
   async function armSwitch() {
     const ownerId = await loadOwnerId();
     if (!ownerId) return;
-    if (kError) { alert(kError); return; }
+    if (kError)    { alert(kError);    return; }
+    if (timeError) { alert(timeError); return; }
     const recipients = contacts.filter((c) => chosen.has(c.id));
     const threshold = kNum;
     if (recipients.length < threshold) { alert(`Servono almeno ${threshold} contatti selezionati.`); return; }
@@ -81,7 +123,7 @@ export default function Compose() {
       // 4) crea/arma lo switch
       let switchId = await loadSwitchId();
       if (!switchId) {
-        const r = await api.createSwitch(ownerId, parseInt(interval) || 60, parseInt(grace) || 30);
+        const r = await api.createSwitch(ownerId, intervalSec, graceSec);
         switchId = r.switchId; await saveSwitchId(switchId);
       }
       await api.arm({ switchId, drivePointer, contentIv: nonce, shares: wire });
@@ -92,6 +134,10 @@ export default function Compose() {
   }
 
   const field = { backgroundColor: colors.surface, borderColor: colors.line, borderWidth: 1, borderRadius: radius.md, padding: space(3), color: colors.ink, fontSize: 16 };
+  const chip = { paddingHorizontal: space(3), paddingVertical: space(2), borderRadius: radius.pill as number, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface };
+  const chipSel = { borderColor: colors.safe, backgroundColor: colors.safeSoft };
+  const chipTxt = { fontSize: 14, color: colors.inkDim };
+  const chipTxtSel = { color: colors.safe, fontWeight: '600' as const };
 
   return (
     <Screen>
@@ -110,12 +156,13 @@ export default function Compose() {
         {contacts.map((c) => {
           const on = chosen.has(c.id);
           const verified = verifiedKeys.has(c.public_key);
+          const isDevContact = c.id?.startsWith('c_dev_');
           return (
             <Pressable key={c.id} onPress={() => toggle(c.id)}
               style={{ flexDirection: 'row', alignItems: 'center', gap: space(3), paddingVertical: space(2) }}>
               <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: on ? colors.safe : colors.line, backgroundColor: on ? colors.safe : 'transparent' }} />
               <View style={{ flex: 1 }}>
-                <Text style={T.body}>{c.public_key.slice(0, 18)}…</Text>
+                <Text style={T.body}>{c.public_key.slice(0, 18)}…{isDevContact && ' [DEV]'}</Text>
                 {!verified && (
                   <Text style={{ fontSize: 11, color: colors.danger }}>⚠ chiave non verificata di persona</Text>
                 )}
@@ -123,20 +170,84 @@ export default function Compose() {
             </Pressable>
           );
         })}
+        {__DEV__ && (
+          <Button
+            label="[DEV] Genera 2 contatti test"
+            variant="ghost"
+            onPress={devSeedContacts}
+          />
+        )}
       </Card>
 
       <Card>
         <Text style={T.label}>SOGLIA E TEMPI</Text>
-        <View style={{ flexDirection: 'row', gap: space(3) }}>
-          <View style={{ flex: 1 }}><Text style={T.dim}>Approvazioni (k)</Text><TextInput value={k} onChangeText={setK} keyboardType="number-pad" style={field} /></View>
-          <View style={{ flex: 1 }}><Text style={T.dim}>Intervallo (s)</Text><TextInput value={interval} onChangeText={setIntervalSec} keyboardType="number-pad" style={field} /></View>
-          <View style={{ flex: 1 }}><Text style={T.dim}>Grazia (s)</Text><TextInput value={grace} onChangeText={setGrace} keyboardType="number-pad" style={field} /></View>
+
+        <View>
+          <Text style={T.dim}>Approvazioni minime per rilasciare (k)</Text>
+          <TextInput value={k} onChangeText={setK} keyboardType="number-pad"
+            style={[field, { width: 80, marginTop: space(2) }]} />
         </View>
-        {kError   && <Text style={{ ...T.dim, color: colors.danger    }}>{kError}</Text>}
-        {kWarning && <Text style={{ ...T.dim, color: colors.heartbeat }}>{kWarning}</Text>}
+
+        <View style={{ gap: space(2) }}>
+          <Text style={T.dim}>Ogni quanto ti chiedo «tutto ok?»</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space(2) }}>
+            {INTERVAL_PRESETS.map(p => (
+              <Pressable key={p.id} onPress={() => setIntervalPreset(p.id)}
+                style={[chip, intervalPreset === p.id && chipSel]}>
+                <Text style={[chipTxt, intervalPreset === p.id && chipTxtSel]}>{p.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {intervalPreset === 'custom' && (
+            <View style={{ flexDirection: 'row', gap: space(2), alignItems: 'center' }}>
+              <TextInput value={customINum} onChangeText={setCustomINum} keyboardType="number-pad"
+                style={[field, { width: 70 }]} />
+              <View style={{ flexDirection: 'row', gap: space(1) }}>
+                {(['hours', 'days'] as TimeUnit[]).concat(__DEV__ ? ['seconds' as TimeUnit] : []).map(u => (
+                  <Pressable key={u} onPress={() => setCustomIUnit(u)}
+                    style={[chip, customIUnit === u && chipSel]}>
+                    <Text style={[chipTxt, customIUnit === u && chipTxtSel]}>
+                      {u === 'hours' ? 'Ore' : u === 'days' ? 'Giorni' : 'Sec'}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
+          {intervalPreset !== 'custom' && (
+            <Text style={{ fontSize: 12, color: colors.inkFaint }}>
+              Il server ti contatta ogni {formatDuration(intervalSec)} se non rispondi
+            </Text>
+          )}
+        </View>
+
+        <View style={{ gap: space(2) }}>
+          <Text style={T.dim}>Tempo di grazia prima dell'allerta ai contatti</Text>
+          <View style={{ flexDirection: 'row', gap: space(2), alignItems: 'center' }}>
+            <TextInput value={graceNum} onChangeText={setGraceNum} keyboardType="number-pad"
+              style={[field, { width: 70 }]} />
+            <View style={{ flexDirection: 'row', gap: space(1) }}>
+              {(['hours', 'days'] as TimeUnit[]).concat(__DEV__ ? ['seconds' as TimeUnit] : []).map(u => (
+                <Pressable key={u} onPress={() => setGraceUnit(u)}
+                  style={[chip, graceUnit === u && chipSel]}>
+                  <Text style={[chipTxt, graceUnit === u && chipTxtSel]}>
+                    {u === 'hours' ? 'Ore' : u === 'days' ? 'Giorni' : 'Sec'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+          <Text style={{ fontSize: 12, color: colors.inkFaint }}>
+            Hai {formatDuration(graceSec)} per rispondere prima che i contatti ricevano l'allerta
+          </Text>
+        </View>
+
+        {kError    && <Text style={{ ...T.dim, color: colors.danger    }}>{kError}</Text>}
+        {kWarning  && <Text style={{ ...T.dim, color: colors.heartbeat }}>{kWarning}</Text>}
+        {timeError && <Text style={{ ...T.dim, color: colors.danger    }}>{timeError}</Text>}
       </Card>
 
-      <Button label={busy ? 'Cifratura…' : 'Cifra e arma lo switch'} onPress={armSwitch} variant="safe" disabled={busy || !!kError} />
+      <Button label={busy ? 'Cifratura…' : 'Cifra e arma lo switch'} onPress={armSwitch} variant="safe" disabled={busy || !!kError || !!timeError} />
     </Screen>
   );
 }

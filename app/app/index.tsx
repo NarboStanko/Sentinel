@@ -6,6 +6,7 @@ import { colors, radius, space } from '../theme';
 import { newSeedPhrase, identityFromSeed, fingerprint, bytesToHex } from '../lib/crypto';
 import { saveSeed, loadIdentity, saveOwnerId } from '../lib/keystore';
 import { api } from '../lib/api';
+import { registerPushToken } from '../lib/notifications';
 
 export default function Onboarding() {
   const [seed, setSeed] = useState<string | null>(null);
@@ -23,6 +24,10 @@ export default function Onboarding() {
       const id = identityFromSeed(seed);
       const { ownerId } = await api.registerOwner(bytesToHex(id.pub));
       await saveOwnerId(ownerId);
+      // Registra subito il push token: senza, l'owner non riceve la notifica
+      // «Tutto ok?» fino al riavvio successivo dell'app (il _layout la chiama
+      // solo se ownerId era già presente all'avvio).
+      registerPushToken('owner', ownerId).catch(() => {});
       router.replace('/home');
     } finally { setBusy(false); }
   }

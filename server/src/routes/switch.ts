@@ -3,17 +3,42 @@ import { nanoid } from 'nanoid';
 import { db, audit } from '../db.js';
 import { withJitter } from './checkin.js';
 
+const HOUR = 3600;
+const DAY  = 86400;
+
+function getLimits(isDev: boolean) {
+  return isDev
+    ? { intervalMin: 30,   intervalMax: 31 * DAY, graceMin: 10   }
+    : { intervalMin: HOUR, intervalMax: 31 * DAY, graceMin: HOUR };
+}
+
 export async function switchRoutes(app: FastifyInstance) {
   app.post<{ Body: { ownerId: string; intervalSec: number; graceSec: number } }>(
     '/switch/create',
-    async (req) => {
+    async (req, reply) => {
+      const { ownerId, intervalSec, graceSec } = req.body;
+      const limits = getLimits(process.env['NODE_ENV'] !== 'production');
+
+      if (intervalSec < limits.intervalMin || intervalSec > limits.intervalMax) {
+        return reply.code(400).send({
+          error: 'intervallo_non_valido',
+          message: `Intervallo non valido: min ${limits.intervalMin}s, max ${limits.intervalMax}s.`,
+        });
+      }
+      if (graceSec < limits.graceMin) {
+        return reply.code(400).send({
+          error: 'grazia_non_valida',
+          message: `Periodo di grazia non valido: min ${limits.graceMin}s.`,
+        });
+      }
+
       // NB: la soglia k NON viene inviata al server. Resta solo sul client
       // (serve a splitSecret); il server non deve conoscerla -> occultamento.
       const id = 'sw_' + nanoid(10);
       db.prepare(
         `INSERT INTO switches (id, owner_id, state, interval_sec, grace_sec)
          VALUES (?,?, 'DISARMED', ?, ?)`
-      ).run(id, req.body.ownerId, req.body.intervalSec, req.body.graceSec);
+      ).run(id, ownerId, intervalSec, graceSec);
       return { switchId: id };
     }
   );

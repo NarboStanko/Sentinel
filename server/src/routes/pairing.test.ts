@@ -1,6 +1,7 @@
 // Verifica: errori di input client → 4xx, errori inattesi → 500 senza stack.
 // I test 1–2 FALLISCONO prima del fix (pairing.ts usa throw → Fastify restituisce 500).
 // Il test 3 verifica il global error handler aggiunto in index.ts (task #15).
+export {}; // marca il file come modulo ES per tsc (evita conflitti di scope)
 
 // DEVE stare prima di qualunque import dinamico: db.ts legge DB_PATH al primo import.
 process.env['DB_PATH'] = ':memory:';
