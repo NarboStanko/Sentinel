@@ -8,23 +8,28 @@ import { db, audit } from '../db.js';
 // raggiunta, e solo allora conferma il rilascio (/release/confirm).
 export async function approvalRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { switchId: string } }>('/approval/request', async (req) => {
-    const sw = db.prepare(
-      'SELECT state, drive_pointer, content_iv FROM switches WHERE id = ?'
-    ).get(req.query.switchId) as any;
+    const sw = db.prepare('SELECT state FROM switches WHERE id = ?').get(req.query.switchId) as any;
     if (!sw || (sw.state !== 'APPROVAL_PENDING' && sw.state !== 'RELEASED')) return { pending: false };
     const submitted = db.prepare(
       'SELECT COUNT(*) AS n FROM shares WHERE switch_id = ? AND submitted_share IS NOT NULL'
     ).get(req.query.switchId) as { n: number };
-    // drivePointer viene esposto SOLO dopo il rilascio confermato (RELEASED).
-    // Prima di quel momento i contatti hanno le quote ma non il blob:
-    // la sicurezza è nella cifratura, questo gate aggiunge una barriera intenzionale.
+    // I puntatori vengono esposti SOLO dopo il rilascio confermato (RELEASED).
+    // Gate intenzionale: i contatti hanno le quote ma non i blob finché non è RELEASED.
     const released = sw.state === 'RELEASED';
+    const contents = released
+      ? (db.prepare(
+          'SELECT drive_pointer, content_iv, label FROM switch_contents WHERE switch_id = ? ORDER BY created_at'
+        ).all(req.query.switchId) as any[]).map(r => ({
+          drivePointer: r.drive_pointer,
+          contentIv:    r.content_iv,
+          label:        r.label,
+        }))
+      : undefined;
     return {
       pending:      sw.state === 'APPROVAL_PENDING',
       released,
       approvedCount: submitted.n,
-      drivePointer: released ? sw.drive_pointer : undefined,
-      contentIv:    released ? sw.content_iv    : undefined,
+      contents,
     };
   });
 

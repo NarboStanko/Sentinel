@@ -40,11 +40,22 @@ CREATE TABLE IF NOT EXISTS switches (
   state TEXT NOT NULL,              -- DISARMED|ACTIVE|GRACE|APPROVAL_PENDING|RELEASED
   interval_sec INTEGER NOT NULL,
   grace_sec INTEGER NOT NULL,
-  drive_pointer TEXT,              -- es. drive://... o https URL al blob CIFRATO
-  content_iv TEXT,                 -- IV del contenuto (non sensibile da solo)
   last_checkin INTEGER,
   next_check_at INTEGER,
   armed_at INTEGER
+);
+
+-- Ogni riga è un contenuto cifrato del pacchetto (append-only durante ACTIVE).
+-- Tutti i contenuti di uno switch condividono la stessa DEK (persistita sul client).
+-- Il server conserva solo il puntatore opaco e l'IV; mai il ciphertext né la chiave.
+-- label: etichetta non-sensibile scelta dall'utente (mostrata in lista, mai contenuto reale).
+CREATE TABLE IF NOT EXISTS switch_contents (
+  id TEXT PRIMARY KEY,
+  switch_id TEXT NOT NULL,
+  drive_pointer TEXT NOT NULL,
+  content_iv TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
 );
 
 -- Quote Shamir CIFRATE e OPACHE. Nessun contact_id: il server non sa a chi
@@ -84,6 +95,11 @@ CREATE TABLE IF NOT EXISTS audit (
   at INTEGER NOT NULL
 );
 `);
+
+// Migrazione idempotente: rimuove le colonne legacy da switches se ancora presenti
+// (database creati prima dell'introduzione di switch_contents). Silenziosa su DB freschi.
+try { db.exec('ALTER TABLE switches DROP COLUMN drive_pointer'); } catch {}
+try { db.exec('ALTER TABLE switches DROP COLUMN content_iv');   } catch {}
 
 export function audit(switchId: string | null, event: string) {
   db.prepare('INSERT INTO audit (switch_id, event, at) VALUES (?,?,?)')

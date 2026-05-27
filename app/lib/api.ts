@@ -17,6 +17,9 @@ async function req<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
+    if (res.status === 413) {
+      throw new ApiError(413, 'Payload troppo grande: riduci la dimensione del file o degli allegati.');
+    }
     let message = `${method} ${path} → ${res.status}`;
     try {
       const json = await res.json() as Record<string, unknown>;
@@ -39,7 +42,7 @@ export const api = {
     req<{ contacts: any[] }>(`/contacts?ownerId=${ownerId}`),
   createSwitch: (ownerId: string, intervalSec: number, graceSec: number) =>
     req<{ switchId: string }>('/switch/create', 'POST', { ownerId, intervalSec, graceSec }),
-  arm: (payload: any) => req<{ ok: boolean }>('/switch/arm', 'POST', payload),
+  arm: (payload: any) => req<{ ok: boolean; contentId: string }>('/switch/arm', 'POST', payload),
   disarm: (switchId: string) => req<{ ok: boolean }>('/switch/disarm', 'POST', { switchId }),
   getSwitch: (switchId: string) => req<{ switch: any }>(`/switch?switchId=${switchId}`),
   checkin: (switchId: string) => req<{ ok: boolean; nextCheckAt: number }>('/checkin/respond', 'POST', { switchId }),
@@ -69,10 +72,16 @@ export const api = {
       `/pending?pub=${encodeURIComponent(pub)}&ts=${ts}&sig=${encodeURIComponent(sig)}`
     ),
 
-  // Aggiunge/sostituisce il contenuto di uno switch ACTIVE senza ridistribuire le quote.
+  // Aggiunge contenuto a uno switch ACTIVE senza ridistribuire le quote.
   // Conta come check-in: azzera next_check_at.
-  addContent: (switchId: string, drivePointer: string, contentIv: string) =>
-    req<{ ok: boolean; nextCheckAt: number }>('/switch/add-content', 'POST', { switchId, drivePointer, contentIv }),
+  addContent: (switchId: string, drivePointer: string, contentIv: string, label?: string) =>
+    req<{ ok: boolean; contentId: string; nextCheckAt: number }>('/switch/add-content', 'POST', { switchId, drivePointer, contentIv, label }),
+
+  removeContent: (switchId: string, contentId: string) =>
+    req<{ ok: boolean; nextCheckAt: number }>('/switch/remove-content', 'POST', { switchId, contentId }),
+
+  listContents: (switchId: string) =>
+    req<{ contents: { id: string; label: string; created_at: number }[] }>(`/switch/contents?switchId=${switchId}`),
 
   // ── SOLO SVILUPPO (NODE_ENV !== 'production' lato server) ─────────────────
   // Crea 2 contatti fittizi sul server e restituisce le loro chiavi pubbliche.

@@ -12,3 +12,8 @@ export async function downloadEncrypted(pointer: string): Promise<string> {
   const bytes = await getActiveProvider().download(pointer);
   return bytesToHex(bytes);
 }
+
+export async function deleteEncrypted(pointer: string): Promise<void> {
+  const p = getActiveProvider();
+  if (p.delete) await p.delete(pointer);
+}

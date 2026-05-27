@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { View, Text, AppState } from 'react-native';
+import { View, Text, AppState, Alert } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { Screen, Card, Button, Pill, T } from '../components/ui';
 import { colors, space } from '../theme';
@@ -44,6 +44,22 @@ export default function Home() {
     }
   }
 
+  function confirmRestart() {
+    Alert.alert(
+      'Ricrea il pacchetto da zero?',
+      'Questa azione è irreversibile:\n\n' +
+      '• Verrà generata una nuova chiave di cifratura\n' +
+      '• Le quote attuali dei contatti non saranno più valide\n' +
+      '• Dovrai ri-armare lo switch e ridistribuire le quote ai contatti\n\n' +
+      'I contatti non ricevono notifica automatica.\n\n' +
+      'Per aggiungere contenuto senza invalidare le quote usa invece "Aggiungi al pacchetto".',
+      [
+        { text: 'Annulla', style: 'cancel' },
+        { text: 'Ricrea da zero', style: 'destructive', onPress: () => router.push('/compose') },
+      ],
+    );
+  }
+
   const meta = STATE_LABEL[sw?.state ?? 'DISARMED'];
   const armed = sw && sw.state !== 'DISARMED';
 
@@ -80,7 +96,12 @@ export default function Home() {
         {sw?.state === 'ACTIVE' && (
           <Button label="Aggiungi al pacchetto" onPress={() => router.push({ pathname: '/compose', params: { mode: 'add' } })} variant="ghost" />
         )}
-        <Button label={armed ? 'Modifica pacchetto' : 'Prepara il pacchetto'} onPress={() => router.push('/compose')} variant="ghost" />
+        {sw?.state === 'ACTIVE' && (
+          <Button label="Ricrea da zero…" onPress={confirmRestart} variant="ghost" />
+        )}
+        {!armed && (
+          <Button label="Prepara il pacchetto" onPress={() => router.push('/compose')} variant="ghost" />
+        )}
         {armed && <Button label="Disarma" onPress={async () => { await api.disarm(switchId!); refresh(); }} variant="ghost" />}
       </View>
 

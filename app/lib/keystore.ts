@@ -44,6 +44,33 @@ export async function deleteDek(switchId: string): Promise<void> {
   await SecureStore.deleteItemAsync(dekKey(switchId));
 }
 
+// Registro client-side dei puntatori ai contenuti (contentId → {pointer, iv}).
+// Usato per pulire i blob dallo storage alla rimozione di un contenuto,
+// senza esporre i puntatori al server prima del RELEASED.
+export type ContentEntry = { pointer: string; iv: string };
+
+const contentRegistryKey = (switchId: string) => 'sentinella.contents.' + switchId;
+
+export async function saveContentPointer(switchId: string, contentId: string, pointer: string, iv: string): Promise<void> {
+  const raw = await SecureStore.getItemAsync(contentRegistryKey(switchId));
+  const reg: Record<string, ContentEntry> = raw ? JSON.parse(raw) : {};
+  reg[contentId] = { pointer, iv };
+  await SecureStore.setItemAsync(contentRegistryKey(switchId), JSON.stringify(reg));
+}
+
+export async function loadContentPointers(switchId: string): Promise<Record<string, ContentEntry>> {
+  const raw = await SecureStore.getItemAsync(contentRegistryKey(switchId));
+  return raw ? JSON.parse(raw) : {};
+}
+
+export async function deleteContentPointer(switchId: string, contentId: string): Promise<void> {
+  const raw = await SecureStore.getItemAsync(contentRegistryKey(switchId));
+  if (!raw) return;
+  const reg: Record<string, ContentEntry> = JSON.parse(raw);
+  delete reg[contentId];
+  await SecureStore.setItemAsync(contentRegistryKey(switchId), JSON.stringify(reg));
+}
+
 // Chiavi verificate di persona — mai fidarsi solo della copia del server.
 // L'owner salva qui le pubkey dei contatti scansionate dal QR.
 // Il contatto salva qui la pubkey dell'owner scansionata dal QR.

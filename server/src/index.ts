@@ -13,13 +13,25 @@ import { devBlobRoutes } from './routes/devblob.js';
 import { debugRoutes } from './routes/debug.js';
 import { startScheduler } from './services/scheduler.js';
 
-const app = Fastify({ logger: true });
+// bodyLimit allineato al tetto allegati. DevBlobProvider trasmette hex (2 byte per byte),
+// quindi max singolo allegato = 25 MB * 2 = 50 MB wire. 200 MB lascia ampio margine.
+const BODY_LIMIT = 200 * 1024 * 1024;
+const app = Fastify({ logger: true, bodyLimit: BODY_LIMIT });
 await app.register(cors, { origin: true });
 
 // Logga sempre lo stack server-side; espone solo un messaggio sicuro al client.
 // Le route devono usare reply.code(4xx).send({error,message}) per errori di input,
 // non throw — questo handler è per bug inattesi.
+// FST_ERR_CTP_BODY_TOO_LARGE transita da qui: rimanda 413 con messaggio leggibile
+// invece di cadere nel catch-all 500.
 app.setErrorHandler((err, _req, reply) => {
+  const status = (err as any).statusCode ?? 500;
+  if (status === 413) {
+    return reply.code(413).send({
+      error: 'payload_too_large',
+      message: `Payload troppo grande. Limite server: ${BODY_LIMIT / 1024 / 1024} MB.`,
+    });
+  }
   app.log.error(err);
   reply.code(500).send({ error: 'internal_error', message: 'Errore interno del server.' });
 });

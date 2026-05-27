@@ -20,6 +20,7 @@ export class DevBlobProvider implements StorageProvider {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ data: bytesToHex(blob) }),
     });
+    if (res.status === 413) throw new Error('[DevBlobProvider] File troppo grande: il server ha rifiutato il payload (413). Controlla bodyLimit in index.ts.');
     if (!res.ok) throw new Error(`[DevBlobProvider] Upload fallito: ${res.status}`);
     const { pointer } = await res.json() as { pointer: string };
     return pointer;

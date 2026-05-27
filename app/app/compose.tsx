@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { View, Text, TextInput, Pressable } from 'react-native';
+import { View, Text, TextInput, Pressable, Alert } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Screen, Card, Button, T } from '../components/ui';
 import { colors, space, radius } from '../theme';
@@ -8,15 +8,17 @@ import {
   loadOwnerId, loadSwitchId, saveSwitchId,
   loadVerifiedContactKeys, saveVerifiedContactKey,
   saveDek, loadDek,
+  saveContentPointer, loadContentPointers, deleteContentPointer,
 } from '../lib/keystore';
-import { encryptWithKey, splitSecret, sealShare, makeDecoy, hexToBytes, bytesToHex, randomBytes } from '../lib/crypto';
-import { uploadEncrypted } from '../lib/drive';
+import { encryptWithKey, decryptContent, splitSecret, sealShare, makeDecoy, hexToBytes, bytesToHex, randomBytes } from '../lib/crypto';
+import { uploadEncrypted, downloadEncrypted, deleteEncrypted } from '../lib/drive';
 import { toSeconds, formatDuration, INTERVAL_PRESETS, PROD_LIMITS, DEV_LIMITS, type TimeUnit, type Preset } from '../lib/timing';
 import { encryptAndUpload, type PendingAttachment, type AttachmentMeta, MAX_FILE_BYTES, MAX_TOTAL_BYTES } from '../lib/attachments';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 
 type PresetId = Preset['id'];
+type ExistingContent = { id: string; label: string; created_at: number };
 
 export default function Compose() {
   // mode='add' → aggiorna contenuto di switch già armato (senza ridistribuire quote)
@@ -24,8 +26,12 @@ export default function Compose() {
   const isAddMode = mode === 'add';
 
   const [text, setText]           = useState('');
+  const [label, setLabel]         = useState('');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [uploadStep, setUploadStep]   = useState<string | null>(null);
+
+  // Add-mode only state
+  const [existingContents, setExistingContents] = useState<ExistingContent[]>([]);
 
   // Arm-mode only state
   const [contacts, setContacts]     = useState<any[]>([]);
@@ -52,9 +58,22 @@ export default function Compose() {
     setVerifiedKeys(vk);
   }, []);
 
+  const loadExistingContents = useCallback(async () => {
+    const switchId = await loadSwitchId();
+    if (!switchId) return;
+    try {
+      const { contents } = await api.listContents(switchId);
+      setExistingContents(contents);
+    } catch { /* switch non trovato */ }
+  }, []);
+
   useFocusEffect(useCallback(() => {
-    if (!isAddMode) loadContacts();
-  }, [isAddMode, loadContacts]));
+    if (isAddMode) {
+      loadExistingContents();
+    } else {
+      loadContacts();
+    }
+  }, [isAddMode, loadContacts, loadExistingContents]));
 
   // ── DEV ONLY ───────────────────────────────────────────────────────────────
   async function devSeedContacts() {
@@ -117,7 +136,55 @@ export default function Compose() {
     return metas;
   }
 
-  // ── Aggiorna contenuto (switch già ACTIVE, stessa DEK) ─────────────────────
+  // ── Rimozione contenuto esistente ──────────────────────────────────────────
+  async function confirmRemoveContent(item: ExistingContent) {
+    if (existingContents.length <= 1) {
+      alert('Un pacchetto armato deve contenere almeno un contenuto. Aggiungi un nuovo contenuto prima di rimuovere questo.');
+      return;
+    }
+    Alert.alert(
+      'Rimuovere questo contenuto?',
+      `"${item.label || '(senza etichetta)'}" verrà eliminato definitivamente dal pacchetto.`,
+      [
+        { text: 'Annulla', style: 'cancel' },
+        { text: 'Rimuovi', style: 'destructive', onPress: () => removeContentItem(item.id) },
+      ],
+    );
+  }
+
+  async function removeContentItem(contentId: string) {
+    const switchId = await loadSwitchId();
+    if (!switchId) return;
+    setBusy(true);
+    try {
+      const dekHex = await loadDek(switchId);
+      const pointers = await loadContentPointers(switchId);
+      const entry = pointers[contentId];
+
+      if (entry && dekHex) {
+        const dek = hexToBytes(dekHex);
+        try {
+          const ctHex = await downloadEncrypted(entry.pointer);
+          const plain = decryptContent(dek, entry.iv, ctHex);
+          const manifest = JSON.parse(new TextDecoder().decode(plain));
+          for (const att of (manifest.attachments ?? [])) {
+            try { await deleteEncrypted(att.pointer); } catch { /* best effort */ }
+          }
+          try { await deleteEncrypted(entry.pointer); } catch { /* best effort */ }
+        } catch { /* se il manifest non è decifrabile, pulizia storage saltata */ }
+      }
+
+      await api.removeContent(switchId, contentId);
+      if (entry) await deleteContentPointer(switchId, contentId);
+      await loadExistingContents();
+    } catch (e: any) {
+      alert('Errore rimozione: ' + (e?.message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ── Aggiunge contenuto (switch già ACTIVE, stessa DEK) ────────────────────
   async function updateContent() {
     const switchId = await loadSwitchId();
     if (!switchId) { alert('Nessuno switch trovato.'); return; }
@@ -135,7 +202,8 @@ export default function Compose() {
       const { nonce, ct } = encryptWithKey(dek, new TextEncoder().encode(manifest));
       setUploadStep('Caricamento manifesto…');
       const drivePointer = await uploadEncrypted(ct);
-      await api.addContent(switchId, drivePointer, nonce);
+      const { contentId } = await api.addContent(switchId, drivePointer, nonce, label || undefined);
+      await saveContentPointer(switchId, contentId, drivePointer, nonce);
       router.replace('/home');
     } catch (e: any) {
       alert('Errore aggiornamento: ' + (e?.message ?? 'Errore sconosciuto'));
@@ -184,30 +252,25 @@ export default function Compose() {
     try {
       // Genera DEK separatamente per poterla salvare e riusare in add-content
       const dek = randomBytes(32);
-      // Cifra e carica ogni allegato con la DEK
       const attMetas = await uploadAllAttachments(dek);
-      // Cifra il manifest
       const manifest = JSON.stringify({ v: 1, text, attachments: attMetas });
       setUploadStep('Cifratura manifesto…');
       const { nonce, ct } = encryptWithKey(dek, new TextEncoder().encode(manifest));
-      // Carica il ciphertext del manifest sul drive esterno
       setUploadStep('Caricamento manifesto…');
       const drivePointer = await uploadEncrypted(ct);
-      // Crea lo switch se non esiste già
       let switchId = await loadSwitchId();
       if (!switchId) {
         const r = await api.createSwitch(ownerId, intervalSec, graceSec);
         switchId = r.switchId; await saveSwitchId(switchId);
       }
-      // Salva la DEK in SecureStore (serve per add-content futuro)
       await saveDek(switchId, bytesToHex(dek));
-      // Spezza la DEK k-su-N, ogni quota cifrata per la pubkey del contatto
       const shares = splitSecret(dek, recipients.length, threshold);
       const real = recipients.map((c, i) => ({ x: shares[i].x, blob: sealShare(hexToBytes(c.public_key), shares[i]) }));
       const TOTAL = 8;
       const decoys = Array.from({ length: Math.max(0, TOTAL - real.length) }, (_, j) => ({ x: 100 + j, blob: makeDecoy(32) }));
       const wire = [...real, ...decoys].sort(() => Math.random() - 0.5);
-      await api.arm({ switchId, drivePointer, contentIv: nonce, shares: wire });
+      const { contentId } = await api.arm({ switchId, drivePointer, contentIv: nonce, label: label || undefined, shares: wire });
+      await saveContentPointer(switchId, contentId, drivePointer, nonce);
       router.replace('/home');
     } catch (e: any) {
       alert('Errore durante l\'armo: ' + (e?.message ?? 'Errore sconosciuto'));
@@ -224,9 +287,42 @@ export default function Compose() {
     <Screen>
       <Text style={T.dim}>
         {isAddMode
-          ? 'Aggiorna il contenuto del pacchetto. Le quote dei contatti restano valide.'
+          ? 'Aggiunta contenuto. Le quote dei contatti restano valide.'
           : 'Cosa rilasciare, a chi, e con quante approvazioni. Tutto viene cifrato sul telefono.'}
       </Text>
+
+      {isAddMode && existingContents.length > 0 && (
+        <Card>
+          <Text style={T.label}>CONTENUTI NEL PACCHETTO ({existingContents.length})</Text>
+          {existingContents.map((item) => (
+            <View key={item.id} style={{ flexDirection: 'row', alignItems: 'center', gap: space(2), paddingVertical: space(2), borderBottomWidth: 1, borderBottomColor: colors.line }}>
+              <View style={{ flex: 1 }}>
+                <Text style={T.body} numberOfLines={1}>{item.label || '(senza etichetta)'}</Text>
+                <Text style={{ fontSize: 12, color: colors.inkFaint }}>
+                  {new Date(item.created_at).toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => confirmRemoveContent(item)}
+                disabled={busy}
+                style={{ paddingHorizontal: space(2), paddingVertical: space(1) }}>
+                <Text style={{ color: colors.danger, fontSize: 14 }}>Rimuovi</Text>
+              </Pressable>
+            </View>
+          ))}
+        </Card>
+      )}
+
+      <Card>
+        <Text style={T.label}>ETICHETTA (OPZIONALE)</Text>
+        <TextInput value={label} onChangeText={setLabel}
+          placeholder="Es. Messaggio principale, Documenti medici…"
+          placeholderTextColor={colors.inkFaint}
+          style={field} />
+        <Text style={{ fontSize: 11, color: colors.inkFaint, marginTop: space(1) }}>
+          Visibile nella lista contenuti — non usare informazioni sensibili.
+        </Text>
+      </Card>
 
       <Card>
         <Text style={T.label}>MESSAGGIO DI RILASCIO</Text>
@@ -355,7 +451,7 @@ export default function Compose() {
 
       {isAddMode ? (
         <Button
-          label={busy ? uploadStep ?? 'Caricamento…' : 'Aggiorna il pacchetto'}
+          label={busy ? uploadStep ?? 'Caricamento…' : 'Aggiungi al pacchetto'}
           onPress={updateContent}
           variant="safe"
           disabled={busy}
