@@ -154,5 +154,80 @@ console.log('10) Produzione: preset Ogni 2 giorni (172800s) → 200');
   ok(res.statusCode === 200, `status 200 (ricevuto: ${res.statusCode})`);
 }
 
+// ── 11) add-content su switch ACTIVE → 200 + puntatore aggiornato + timer rinnovato ──
+console.log('11) add-content su switch ACTIVE → 200, DB aggiornato, next_check_at rinnovato');
+{
+  process.env['NODE_ENV'] = 'test';
+  const createRes = await app.inject({
+    method: 'POST', url: '/switch/create',
+    payload: { ownerId: 'usr_add', intervalSec: 30, graceSec: 10 },
+  });
+  const { switchId } = JSON.parse(createRes.payload) as any;
+  const oldNext = Date.now() + 30_000;
+  db.prepare("UPDATE switches SET state='ACTIVE', drive_pointer='old-ptr', content_iv='old-iv', next_check_at=? WHERE id=?")
+    .run(oldNext, switchId);
+
+  const addRes = await app.inject({
+    method: 'POST', url: '/switch/add-content',
+    payload: { switchId, drivePointer: 'new-ptr', contentIv: 'new-iv' },
+  });
+  const addBody = JSON.parse(addRes.payload) as any;
+  ok(addRes.statusCode === 200, `status 200 (${addRes.statusCode})`);
+  ok(addBody.ok === true, 'ok === true');
+  ok(typeof addBody.nextCheckAt === 'number', `nextCheckAt presente`);
+
+  const sw = db.prepare('SELECT drive_pointer, content_iv, next_check_at FROM switches WHERE id=?').get(switchId) as any;
+  ok(sw.drive_pointer === 'new-ptr', `drive_pointer aggiornato (${sw.drive_pointer})`);
+  ok(sw.content_iv   === 'new-iv',  `content_iv aggiornato (${sw.content_iv})`);
+  ok(sw.next_check_at !== oldNext,  'next_check_at rinnovato');
+}
+
+// ── 12) add-content su switch DISARMED → 409 ─────────────────────────────────
+console.log('12) add-content su switch DISARMED → 409');
+{
+  process.env['NODE_ENV'] = 'test';
+  const createRes = await app.inject({
+    method: 'POST', url: '/switch/create',
+    payload: { ownerId: 'usr_add2', intervalSec: 30, graceSec: 10 },
+  });
+  const { switchId } = JSON.parse(createRes.payload) as any;
+
+  const res = await app.inject({
+    method: 'POST', url: '/switch/add-content',
+    payload: { switchId, drivePointer: 'ptr', contentIv: 'iv' },
+  });
+  const body = JSON.parse(res.payload) as any;
+  ok(res.statusCode === 409, `status 409 (${res.statusCode})`);
+  ok(body.error === 'switch_non_attivo', `error=switch_non_attivo (${body.error})`);
+}
+
+// ── 13) add-content su switch inesistente → 404 ───────────────────────────────
+console.log('13) add-content su switch inesistente → 404');
+{
+  const res = await app.inject({
+    method: 'POST', url: '/switch/add-content',
+    payload: { switchId: 'sw_nonexistent_xyz', drivePointer: 'ptr', contentIv: 'iv' },
+  });
+  ok(res.statusCode === 404, `status 404 (${res.statusCode})`);
+}
+
+// ── 14) add-content su switch APPROVAL_PENDING → 409 ─────────────────────────
+console.log('14) add-content su switch APPROVAL_PENDING → 409');
+{
+  process.env['NODE_ENV'] = 'test';
+  const createRes = await app.inject({
+    method: 'POST', url: '/switch/create',
+    payload: { ownerId: 'usr_add3', intervalSec: 30, graceSec: 10 },
+  });
+  const { switchId } = JSON.parse(createRes.payload) as any;
+  db.prepare("UPDATE switches SET state='APPROVAL_PENDING' WHERE id=?").run(switchId);
+
+  const res = await app.inject({
+    method: 'POST', url: '/switch/add-content',
+    payload: { switchId, drivePointer: 'ptr', contentIv: 'iv' },
+  });
+  ok(res.statusCode === 409, `status 409 (${res.statusCode})`);
+}
+
 console.log(`\nRisultato: ${pass} passati, ${fail} falliti`);
 process.exit(fail ? 1 : 0);

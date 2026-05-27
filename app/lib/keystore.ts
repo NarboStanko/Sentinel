@@ -30,6 +30,20 @@ const SWITCH_KEY = 'sentinella.switchId';
 export async function saveSwitchId(id: string) { await SecureStore.setItemAsync(SWITCH_KEY, id); }
 export async function loadSwitchId(): Promise<string | null> { return SecureStore.getItemAsync(SWITCH_KEY); }
 
+// DEK per switch: salvata dopo l'armo per permettere add-content senza ridistribuire le quote.
+const dekKey = (switchId: string) => 'sentinella.dek.' + switchId;
+export async function saveDek(switchId: string, dekHex: string): Promise<void> {
+  await SecureStore.setItemAsync(dekKey(switchId), dekHex, {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
+export async function loadDek(switchId: string): Promise<string | null> {
+  return SecureStore.getItemAsync(dekKey(switchId));
+}
+export async function deleteDek(switchId: string): Promise<void> {
+  await SecureStore.deleteItemAsync(dekKey(switchId));
+}
+
 // Chiavi verificate di persona — mai fidarsi solo della copia del server.
 // L'owner salva qui le pubkey dei contatti scansionate dal QR.
 // Il contatto salva qui la pubkey dell'owner scansionata dal QR.

@@ -77,6 +77,9 @@ export default function Home() {
 
       <View style={{ gap: space(3), marginTop: space(2) }}>
         <Button label="Contatti fidati" onPress={() => router.push('/contacts')} variant="ghost" />
+        {sw?.state === 'ACTIVE' && (
+          <Button label="Aggiungi al pacchetto" onPress={() => router.push({ pathname: '/compose', params: { mode: 'add' } })} variant="ghost" />
+        )}
         <Button label={armed ? 'Modifica pacchetto' : 'Prepara il pacchetto'} onPress={() => router.push('/compose')} variant="ghost" />
         {armed && <Button label="Disarma" onPress={async () => { await api.disarm(switchId!); refresh(); }} variant="ghost" />}
       </View>

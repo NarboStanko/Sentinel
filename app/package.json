@@ -8,7 +8,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "test:crypto": "tsx lib/crypto.test.ts",
-    "test:storage": "tsx lib/storage.test.ts"
+    "test:storage": "tsx lib/storage.test.ts",
+    "test:attachments": "tsx lib/attachments.test.ts"
   },
   "dependencies": {
     "@noble/ciphers": "^1.0.0",

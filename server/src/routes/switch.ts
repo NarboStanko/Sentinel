@@ -70,6 +70,30 @@ export async function switchRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  // Aggiunge/sostituisce il contenuto cifrato di uno switch ACTIVE.
+  // Non tocca le quote (stessa DEK → i contatti possono ancora rilasciare).
+  // Conta come check-in: resetta next_check_at.
+  app.post<{ Body: { switchId: string; drivePointer: string; contentIv: string } }>(
+    '/switch/add-content',
+    async (req, reply) => {
+      const { switchId, drivePointer, contentIv } = req.body;
+      const sw = db.prepare('SELECT state, interval_sec FROM switches WHERE id = ?').get(switchId) as
+        | { state: string; interval_sec: number } | undefined;
+      if (!sw) return reply.code(404).send({ error: 'switch_non_trovato', message: 'Switch non trovato.' });
+      if (sw.state !== 'ACTIVE') return reply.code(409).send({
+        error: 'switch_non_attivo',
+        message: 'Il contenuto può essere aggiunto solo quando lo switch è ACTIVE.',
+      });
+      const now = Date.now();
+      const nextCheckAt = now + withJitter(sw.interval_sec) * 1000;
+      db.prepare(
+        `UPDATE switches SET drive_pointer=?, content_iv=?, last_checkin=?, next_check_at=? WHERE id=?`
+      ).run(drivePointer, contentIv, now, nextCheckAt, switchId);
+      audit(switchId, 'CONTENT_ADDED');
+      return { ok: true, nextCheckAt };
+    }
+  );
+
   app.post<{ Body: { switchId: string } }>('/switch/disarm', async (req) => {
     db.prepare("UPDATE switches SET state='DISARMED', next_check_at=NULL WHERE id=?")
       .run(req.body.switchId);

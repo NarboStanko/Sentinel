@@ -69,6 +69,11 @@ export const api = {
       `/pending?pub=${encodeURIComponent(pub)}&ts=${ts}&sig=${encodeURIComponent(sig)}`
     ),
 
+  // Aggiunge/sostituisce il contenuto di uno switch ACTIVE senza ridistribuire le quote.
+  // Conta come check-in: azzera next_check_at.
+  addContent: (switchId: string, drivePointer: string, contentIv: string) =>
+    req<{ ok: boolean; nextCheckAt: number }>('/switch/add-content', 'POST', { switchId, drivePointer, contentIv }),
+
   // ── SOLO SVILUPPO (NODE_ENV !== 'production' lato server) ─────────────────
   // Crea 2 contatti fittizi sul server e restituisce le loro chiavi pubbliche.
   // L'app le salva come "verificate" solo per superare il controllo compose.

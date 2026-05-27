@@ -97,6 +97,12 @@ export function encryptContent(plaintext: Uint8Array) {
   const ct = xchacha20poly1305(dek, nonce).encrypt(plaintext);
   return { dek, nonce: bytesToHex(nonce), ct: bytesToHex(ct) };
 }
+// Cifra con una DEK già esistente (per add-content senza ridistribuire le quote).
+export function encryptWithKey(dek: Uint8Array, plaintext: Uint8Array): { nonce: string; ct: string } {
+  const nonce = randomBytes(24);
+  const ct = xchacha20poly1305(dek, nonce).encrypt(plaintext);
+  return { nonce: bytesToHex(nonce), ct: bytesToHex(ct) };
+}
 export function decryptContent(dek: Uint8Array, nonceHex: string, ctHex: string): Uint8Array {
   return xchacha20poly1305(dek, hexToBytes(nonceHex)).decrypt(hexToBytes(ctHex));
 }
@@ -144,7 +150,7 @@ export function combineSecret(shares: Share[]): Uint8Array {
 export const shareToWire = (s: Share) => ({ x: s.x, y: bytesToHex(s.y) });
 export const shareFromWire = (w: { x: number; y: string }): Share => ({ x: w.x, y: hexToBytes(w.y) });
 
-export { bytesToHex, hexToBytes };
+export { bytesToHex, hexToBytes, randomBytes };
 
 // Firma una sfida (stringa UTF-8) con la chiave privata P-256.
 // Formato compatto (64 byte, r+s): accettato da p256.verify() lato server.
