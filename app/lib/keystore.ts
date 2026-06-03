@@ -109,6 +109,34 @@ export async function loadBackupPin(): Promise<{ hashHex: string; saltHex: strin
   return raw ? JSON.parse(raw) : null;
 }
 
+// IDs dei pairing in cui questo device è il CONTATTO (non l'owner).
+// Struttura: [{contactId, ownerPublicKey, pairedAt}]
+const MY_CONTACT_IDS_KEY = 'sentinella.my_contact_ids';
+
+export type MyContactEntry = { contactId: string; ownerPublicKey: string; pairedAt: number };
+
+export async function saveMyContactId(contactId: string, ownerPublicKey: string): Promise<void> {
+  const raw = await SecureStore.getItemAsync(MY_CONTACT_IDS_KEY);
+  const list: MyContactEntry[] = raw ? JSON.parse(raw) : [];
+  if (!list.find(e => e.contactId === contactId)) {
+    list.push({ contactId, ownerPublicKey, pairedAt: Date.now() });
+    await SecureStore.setItemAsync(MY_CONTACT_IDS_KEY, JSON.stringify(list));
+  }
+}
+
+export async function loadMyContactIds(): Promise<MyContactEntry[]> {
+  const raw = await SecureStore.getItemAsync(MY_CONTACT_IDS_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+export async function deleteMyContactId(contactId: string): Promise<void> {
+  const raw = await SecureStore.getItemAsync(MY_CONTACT_IDS_KEY);
+  if (!raw) return;
+  const list: MyContactEntry[] = JSON.parse(raw);
+  const filtered = list.filter(e => e.contactId !== contactId);
+  await SecureStore.setItemAsync(MY_CONTACT_IDS_KEY, JSON.stringify(filtered));
+}
+
 // Token di sessione dalla /auth/verify (usato per audit, scade in 30min)
 const AUTH_TOKEN_KEY = 'sentinella.auth_token';
 export async function saveAuthToken(token: string): Promise<void> {

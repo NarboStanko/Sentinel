@@ -20,7 +20,7 @@ export async function debugRoutes(app: FastifyInstance) {
     return;
   }
   // Conferma visibile nei log all'avvio: se questa riga non appare, le rotte non sono montate.
-  app.log.warn(`[debug] rotte di sviluppo attive (NODE_ENV="${env ?? 'undefined'}") — /debug/expire + /debug/seed-contacts`);
+  app.log.warn(`[debug] rotte di sviluppo attive (NODE_ENV="${env ?? 'undefined'}") — /debug/expire + /debug/seed-contacts + /debug/cleanup-orphan-contacts`);
 
   app.post<{ Params: { switchId: string } }>(
     '/debug/expire/:switchId',
@@ -86,4 +86,31 @@ export async function debugRoutes(app: FastifyInstance) {
       return { contacts: seeded };
     }
   );
+
+  // ── POST /debug/cleanup-orphan-contacts ───────────────────────────────────────
+  // Cancella tutti i contatti con push_token='DEVTEST_NO_PUSH' e le loro quote orfane
+  // da switch DISARMED/RELEASED. Usato nei test per ripristinare lo stato pulito.
+  app.post('/debug/cleanup-orphan-contacts', async (req) => {
+    const orphanOwnerIds = (db.prepare(
+      "SELECT DISTINCT owner_id FROM contacts WHERE push_token = 'DEVTEST_NO_PUSH'"
+    ).all() as { owner_id: string }[]).map(r => r.owner_id);
+
+    const deleted = db.prepare("DELETE FROM contacts WHERE push_token = 'DEVTEST_NO_PUSH'").run();
+
+    let sharesCleaned = 0;
+    if (orphanOwnerIds.length > 0) {
+      const dormantIds = (db.prepare(
+        `SELECT id FROM switches WHERE owner_id IN (${orphanOwnerIds.map(() => '?').join(',')}) AND state IN ('DISARMED','RELEASED')`
+      ).all(...orphanOwnerIds) as { id: string }[]).map(s => s.id);
+      if (dormantIds.length > 0) {
+        const r = db.prepare(
+          `DELETE FROM shares WHERE switch_id IN (${dormantIds.map(() => '?').join(',')})`
+        ).run(...dormantIds);
+        sharesCleaned = r.changes;
+      }
+    }
+
+    req.log.warn({ contactsDeleted: deleted.changes, sharesCleaned }, '[debug] cleanup-orphan-contacts');
+    return { ok: true, contactsDeleted: deleted.changes, sharesCleaned };
+  });
 }

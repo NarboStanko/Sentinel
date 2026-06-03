@@ -4,7 +4,11 @@ const BASE =
   (Constants.expoConfig?.extra?.serverUrl as string) ?? 'http://localhost:4000';
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly body?: Record<string, unknown>,
+  ) {
     super(message);
     this.name = 'ApiError';
   }
@@ -21,12 +25,13 @@ async function req<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
       throw new ApiError(413, 'Payload troppo grande: riduci la dimensione del file o degli allegati.');
     }
     let message = `${method} ${path} → ${res.status}`;
+    let body: Record<string, unknown> | undefined;
     try {
-      const json = await res.json() as Record<string, unknown>;
-      if (typeof json['message'] === 'string') message = json['message'];
-      else if (typeof json['error'] === 'string') message = json['error'];
+      body = await res.json() as Record<string, unknown>;
+      if (typeof body['message'] === 'string') message = body['message'];
+      else if (typeof body['error'] === 'string') message = body['error'];
     } catch { /* body non è JSON, usa il messaggio di default */ }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body);
   }
   return res.json() as Promise<T>;
 }
@@ -94,6 +99,13 @@ export const api = {
 
   listContents: (switchId: string) =>
     req<{ contents: { id: string; label: string; created_at: number }[] }>(`/switch/contents?switchId=${switchId}`),
+
+  removeContact: (contactId: string, ownerPub: string, ts: number, sig: string, force?: boolean) =>
+    req<{ ok: boolean }>(`/contacts/${contactId}`, 'DELETE', { ownerPub, ts, sig, ...(force ? { force } : {}) }),
+  rejectPairing: (contactId: string, contactPub: string, ts: number, sig: string) =>
+    req<{ ok: boolean }>(`/contacts/${contactId}/reject`, 'DELETE', { contactPub, ts, sig }),
+  rotateContactKey: (contactId: string, newPublicKey: string, ownerPub: string, ts: number, sig: string) =>
+    req<{ ok: boolean }>(`/contacts/${contactId}`, 'PUT', { ownerPub, ts, sig, newPublicKey }),
 
   // ── SOLO SVILUPPO (NODE_ENV !== 'production' lato server) ─────────────────
   // Crea 2 contatti fittizi sul server e restituisce le loro chiavi pubbliche.

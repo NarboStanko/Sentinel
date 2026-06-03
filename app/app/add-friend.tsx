@@ -9,6 +9,7 @@ import { api } from '../lib/api';
 import {
   loadOwnerId, loadIdentity, saveSeed,
   saveVerifiedContactKey, saveVerifiedOwnerKey,
+  saveMyContactId,
 } from '../lib/keystore';
 import { registerPushToken } from '../lib/notifications';
 import { newSeedPhrase, identityFromSeed, safetyNumber, bytesToHex, hexToBytes } from '../lib/crypto';
@@ -18,12 +19,13 @@ import { newSeedPhrase, identityFromSeed, safetyNumber, bytesToHex, hexToBytes }
 // Contatto: choose → contact_scan_a → contact_show_b → both_confirm → done
 type Step =
   | 'choose'
-  | 'owner_show_a'     // owner mostra QR_A = {token, ownerPublicKey}
-  | 'owner_scan_b'     // owner scansiona QR_B del contatto
-  | 'contact_scan_a'   // contatto scansiona QR_A dell'owner
-  | 'contact_show_b'   // contatto mostra QR_B = {token, contactPublicKey}
-  | 'both_confirm'     // entrambi vedono safety number e confermano
-  | 'rejected'         // owner ha rifiutato — stato incoerente spiegato
+  | 'owner_show_a'       // owner mostra QR_A = {token, ownerPublicKey}
+  | 'owner_scan_b'       // owner scansiona QR_B del contatto
+  | 'contact_scan_a'     // contatto scansiona QR_A dell'owner
+  | 'contact_show_b'     // contatto mostra QR_B = {token, contactPublicKey}
+  | 'both_confirm'       // entrambi vedono safety number e confermano
+  | 'rejected'           // owner ha rifiutato — stato incoerente spiegato
+  | 'pair_duplicate'     // push_token già registrato: mostra QR key_update all'owner
   | 'done';
 
 type Role = 'owner' | 'contact';
@@ -110,16 +112,19 @@ export default function AddFriend() {
 
   // ── CONTATTO passo 3: conferma → chiama /pair → registra push token ───────
   async function contactConfirm() {
-    if (!qrB) return;
+    if (!qrB || !qrA) return;
     try {
       const { contactId } = await api.pair(qrB.token, qrB.contactPublicKey);
-      // Registra il push token subito dopo il pairing: il server potrà notificare
-      // questo contatto quando scatta una richiesta di approvazione.
+      // Salva il contactId per permettere il rifiuto futuro dalla schermata Contatti
+      await saveMyContactId(contactId, qrA.ownerPublicKey);
       registerPushToken('contact', contactId).catch(() => {});
       setStep('done');
     } catch (e: any) {
       if (e?.status === 404) {
         alert('Invito non valido o già usato. Chiedi all\'owner un nuovo QR.');
+      } else if (e?.status === 409 && e?.body?.error === 'push_token_duplicato') {
+        // Stesso dispositivo già registrato: mostra QR key_update all'owner
+        setStep('pair_duplicate');
       } else {
         alert('Errore durante il pairing: ' + (e?.message ?? 'Errore sconosciuto'));
       }
@@ -268,6 +273,32 @@ export default function AddFriend() {
           </Text>
           <Text style={T.dim}>
             Avvisa il contatto che il pairing è da ripetere.
+          </Text>
+          <Button label="Chiudi" onPress={() => router.back()} variant="ghost" />
+        </Card>
+      )}
+
+      {/* ── Push token duplicato: mostra QR key_update all'owner ──────────── */}
+      {step === 'pair_duplicate' && qrB && (
+        <Card tone="heartbeat">
+          <Text style={T.heading}>Dispositivo già registrato</Text>
+          <Text style={T.dim}>
+            Il tuo dispositivo è già registrato come contatto di quest'owner con una chiave precedente
+            (probabilmente hai reinstallato l'app).
+          </Text>
+          <Text style={T.dim}>
+            Mostra questo QR all'owner. Lui deve andare su{' '}
+            <Text style={{ fontWeight: '600' }}>Contatti → Aggiorna chiave</Text>{' '}
+            e scansionarlo per sostituire la tua vecchia chiave.
+          </Text>
+          <View style={{ alignItems: 'center', backgroundColor: colors.surface, padding: space(5), borderRadius: 14 }}>
+            <QRCode
+              value={JSON.stringify({ type: 'key_update', contactPublicKey: qrB.contactPublicKey })}
+              size={200}
+            />
+          </View>
+          <Text style={{ ...T.mono, fontSize: 11, color: colors.inkFaint, textAlign: 'center' }}>
+            {qrB.contactPublicKey.slice(0, 22)}…
           </Text>
           <Button label="Chiudi" onPress={() => router.back()} variant="ghost" />
         </Card>

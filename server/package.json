@@ -11,7 +11,8 @@
     "test:routes": "tsx src/routes/pairing.test.ts",
     "test:scheduler": "tsx src/services/scheduler.test.ts",
     "test:debug": "tsx src/routes/debug.test.ts",
-    "test:switch": "tsx src/routes/switch.test.ts"
+    "test:switch": "tsx src/routes/switch.test.ts",
+    "test:contacts": "tsx src/routes/contacts.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
