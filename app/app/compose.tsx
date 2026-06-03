@@ -269,7 +269,7 @@ export default function Compose() {
       const TOTAL = 8;
       const decoys = Array.from({ length: Math.max(0, TOTAL - real.length) }, (_, j) => ({ x: 100 + j, blob: makeDecoy(32) }));
       const wire = [...real, ...decoys].sort(() => Math.random() - 0.5);
-      const { contentId } = await api.arm({ switchId, drivePointer, contentIv: nonce, label: label || undefined, shares: wire });
+      const { contentId } = await api.arm({ switchId, drivePointer, contentIv: nonce, label: label || undefined, shares: wire, recoveryK: threshold });
       await saveContentPointer(switchId, contentId, drivePointer, nonce);
       router.replace('/home');
     } catch (e: any) {

@@ -34,3 +34,8 @@ export const approvalPush = (to: string, ownerName: string): PushMsg => ({
   body: `${ownerName} non risponde. Apri l'app per decidere.`,
   data: { type: 'approval' },
 });
+export const recoveryPush = (to: string, ownerName: string): PushMsg => ({
+  to, title: 'Avviso sicurezza — Sentinella',
+  body: `${ownerName || 'Un utente'} ha avviato una richiesta di rotazione identità.`,
+  data: { type: 'recovery' },
+});

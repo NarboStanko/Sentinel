@@ -34,6 +34,8 @@ function routeFromData(data: Record<string, unknown>) {
     router.push('/home');
   } else if (data.type === 'approval') {
     router.push('/approve');
+  } else if (data.type === 'recovery') {
+    router.push('/social-recovery');
   }
 }
 
@@ -85,12 +87,16 @@ export default function Layout() {
       headerTitleStyle: { fontWeight: '600' },
       contentStyle: { backgroundColor: colors.bg },
     }}>
-      <Stack.Screen name="index"      options={{ headerShown: false }} />
-      <Stack.Screen name="home"       options={{ headerShown: false }} />
-      <Stack.Screen name="contacts"   options={{ title: 'Contatti fidati' }} />
-      <Stack.Screen name="add-friend" options={{ title: 'Aggiungi amico' }} />
-      <Stack.Screen name="compose"    options={{ title: 'Prepara il pacchetto' }} />
-      <Stack.Screen name="approve"    options={{ title: 'Richiesta di rilascio' }} />
+      <Stack.Screen name="index"           options={{ headerShown: false }} />
+      <Stack.Screen name="home"            options={{ headerShown: false }} />
+      <Stack.Screen name="contacts"        options={{ title: 'Contatti fidati' }} />
+      <Stack.Screen name="add-friend"      options={{ title: 'Aggiungi amico' }} />
+      <Stack.Screen name="compose"         options={{ title: 'Prepara il pacchetto' }} />
+      <Stack.Screen name="approve"         options={{ title: 'Richiesta di rilascio' }} />
+      <Stack.Screen name="restore"         options={{ title: 'Ripristina account' }} />
+      <Stack.Screen name="backup"          options={{ title: 'Backup seed' }} />
+      <Stack.Screen name="social-recovery" options={{ title: 'Recovery identità' }} />
+      <Stack.Screen name="verify-seed"     options={{ title: 'Verifica seed' }} />
     </Stack>
   );
 }

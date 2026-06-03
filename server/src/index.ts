@@ -11,6 +11,7 @@ import { pushRoutes } from './routes/push.js';
 import { pendingRoutes } from './routes/pending.js';
 import { devBlobRoutes } from './routes/devblob.js';
 import { debugRoutes } from './routes/debug.js';
+import { auditRoutes } from './routes/audit.js';
 import { startScheduler } from './services/scheduler.js';
 
 // bodyLimit allineato al tetto allegati. DevBlobProvider trasmette hex (2 byte per byte),
@@ -47,6 +48,7 @@ await app.register(vaultRoutes);
 await app.register(approvalRoutes);
 await app.register(pushRoutes);
 await app.register(pendingRoutes);
+await app.register(auditRoutes);
 await app.register(devBlobRoutes); // dev only
 await app.register(debugRoutes);  // dev only (no-op in production)
 

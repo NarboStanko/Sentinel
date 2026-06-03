@@ -96,3 +96,24 @@ export async function saveVerifiedOwnerKey(pubkeyHex: string): Promise<void> {
 export async function loadVerifiedOwnerKey(): Promise<string | null> {
   return SecureStore.getItemAsync(VERIFIED_OWNER_KEY_KEY);
 }
+
+// PIN di protezione per la pagina backup seed
+const BACKUP_PIN_KEY = 'sentinella.backup_pin';
+export async function saveBackupPin(hashHex: string, saltHex: string): Promise<void> {
+  await SecureStore.setItemAsync(BACKUP_PIN_KEY, JSON.stringify({ hashHex, saltHex }), {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
+export async function loadBackupPin(): Promise<{ hashHex: string; saltHex: string } | null> {
+  const raw = await SecureStore.getItemAsync(BACKUP_PIN_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+// Token di sessione dalla /auth/verify (usato per audit, scade in 30min)
+const AUTH_TOKEN_KEY = 'sentinella.auth_token';
+export async function saveAuthToken(token: string): Promise<void> {
+  await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+}
+export async function loadAuthToken(): Promise<string | null> {
+  return SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+}

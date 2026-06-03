@@ -4,6 +4,7 @@ import { db, audit } from '../db.js';
 import { p256 } from '@noble/curves/p256';
 import { sha256 } from '@noble/hashes/sha256';
 import { hexToBytes } from '@noble/hashes/utils';
+import { sendPush, recoveryPush } from '../services/pushSender.js';
 
 // RECOVERY SOCIALE — FAIL-SAFE
 // NON disarma e NON rilascia: ruota soltanto la chiave pubblica del proprietario
@@ -17,13 +18,36 @@ export async function recoveryRoutes(app: FastifyInstance) {
     '/recovery/initiate',
     async (req) => {
       const { ownerId, newPublicKey } = req.body;
-      const delay = Math.max(0, req.body.delaySec ?? 24 * 3600); // default 24h
+      // Default 7 giorni (604800s). Non scendere sotto 0.
+      const delay = Math.max(0, req.body.delaySec ?? 7 * 24 * 3600);
+
+      // Blocca se uno switch e' in GRACE o APPROVAL_PENDING: non si puo' ruotare
+      // l'identita' mentre un rilascio e' in corso.
+      const inFlight = db.prepare(
+        "SELECT 1 FROM switches WHERE owner_id = ? AND state IN ('GRACE','APPROVAL_PENDING')"
+      ).get(ownerId);
+      if (inFlight) {
+        return { ok: false, reason: 'rilascio in corso: recovery bloccato' };
+      }
+
       const id = 'rec_' + nanoid(12);
+      const unlockAt = Date.now() + delay * 1000;
       db.prepare('INSERT INTO recoveries (id, owner_id, new_public_key, unlock_at, created_at) VALUES (?,?,?,?,?)')
-        .run(id, ownerId, newPublicKey, Date.now() + delay * 1000, Date.now());
-      audit(null, 'RECOVERY_INITIATED');
-      // TODO: push ai contatti + al vecchio push token del proprietario (rilevazione attacco)
-      return { recoveryId: id, unlockAt: Date.now() + delay * 1000 };
+        .run(id, ownerId, newPublicKey, unlockAt, Date.now());
+      audit(null, 'ROTATION_REQUESTED');
+
+      // Invia push ai contatti fidati (senza segreti: solo «apri l'app»)
+      const owner = db.prepare('SELECT display_name FROM users WHERE id = ?').get(ownerId) as
+        | { display_name: string | null } | undefined;
+      const ownerName = owner?.display_name ?? '';
+      const contacts = db.prepare('SELECT push_token FROM contacts WHERE owner_id = ?').all(ownerId) as
+        { push_token: string | null }[];
+      const msgs = contacts
+        .filter((c) => c.push_token)
+        .map((c) => recoveryPush(c.push_token!, ownerName));
+      if (msgs.length > 0) sendPush(msgs, app.log).catch(() => {});
+
+      return { ok: true, recoveryId: id, unlockAt };
     }
   );
 
@@ -43,7 +67,7 @@ export async function recoveryRoutes(app: FastifyInstance) {
       if (!ok) return { ok: false, reason: 'firma non valida' };
       db.prepare('INSERT OR IGNORE INTO recovery_approvals (recovery_id, contact_public_key, created_at) VALUES (?,?,?)')
         .run(recoveryId, contactPublicKey, Date.now());
-      audit(null, 'RECOVERY_APPROVED');
+      audit(null, 'ROTATION_APPROVED');
       const n = db.prepare('SELECT COUNT(*) AS n FROM recovery_approvals WHERE recovery_id = ?').get(recoveryId) as { n: number };
       return { ok: true, approvals: n.n };
     }
@@ -62,10 +86,10 @@ export async function recoveryRoutes(app: FastifyInstance) {
       "SELECT 1 FROM switches WHERE owner_id = ? AND state IN ('GRACE','APPROVAL_PENDING')"
     ).get(rec.owner_id);
     if (inFlight) return { ok: false, reason: 'rilascio in corso: recovery bloccato' };
-    // ROTAZIONE: cambia solo la chiave pubblica di controllo. Quote e contenuti intatti.
+    // INVARIANTE: ruota SOLO la chiave pubblica. Non tocca DEK, quote, switch state.
     db.prepare('UPDATE users SET public_key = ? WHERE id = ?').run(rec.new_public_key, rec.owner_id);
     db.prepare('UPDATE recoveries SET finalized = 1 WHERE id = ?').run(req.body.recoveryId);
-    audit(null, 'RECOVERY_FINALIZED');
+    audit(null, 'ROTATION_COMPLETED');
     return { ok: true };
   });
 
@@ -78,7 +102,64 @@ export async function recoveryRoutes(app: FastifyInstance) {
     const ok = p256.verify(hexToBytes(req.body.sig), sha256(new TextEncoder().encode(req.body.recoveryId)), hexToBytes(owner.public_key));
     if (!ok) return { ok: false, reason: 'firma non valida' };
     db.prepare('UPDATE recoveries SET cancelled = 1 WHERE id = ?').run(req.body.recoveryId);
-    audit(null, 'RECOVERY_CANCELLED');
+    audit(null, 'ROTATION_CANCELLED');
     return { ok: true };
+  });
+
+  // Lista dei recovery pendenti per un contatto (stessa auth one-shot usata da /pending).
+  // Il contatto firma sha256("sentinella:recovery-pending:" + pub + ":" + ts) con la sua chiave P-256.
+  app.get<{
+    Querystring: { pub: string; ts: string; sig: string };
+  }>('/recovery/pending-for-contact', async (req, reply) => {
+    const { pub, ts, sig } = req.query;
+
+    // 1) timestamp fresco (±5 minuti)
+    const tsNum = parseInt(ts, 10);
+    if (!tsNum || Math.abs(Date.now() - tsNum) > 5 * 60_000) {
+      return reply.code(401).send({ error: 'timestamp scaduto o mancante' });
+    }
+
+    // 2) firma valida — lega identita' e timestamp, non riutilizzabile
+    let verified = false;
+    try {
+      const challenge = 'sentinella:recovery-pending:' + pub + ':' + ts;
+      const msgHash = sha256(new TextEncoder().encode(challenge));
+      verified = p256.verify(hexToBytes(sig), msgHash, hexToBytes(pub));
+    } catch {
+      return reply.code(401).send({ error: 'firma non valida' });
+    }
+    if (!verified) return reply.code(401).send({ error: 'firma non valida' });
+
+    // 3) trova il contatto per chiave pubblica
+    const contact = db
+      .prepare('SELECT id, owner_id FROM contacts WHERE public_key = ?')
+      .get(pub) as { id: string; owner_id: string } | undefined;
+    if (!contact) return { recoveries: [] };
+
+    // 4) restituisce i recovery aperti per l'owner di questo contatto
+    const rows = db.prepare(
+      `SELECT r.id AS recoveryId, u.display_name AS ownerName, r.unlock_at AS unlockAt,
+              (SELECT COUNT(*) FROM recovery_approvals ra WHERE ra.recovery_id = r.id) AS approvalCount,
+              (SELECT COUNT(*) FROM recovery_approvals ra2 WHERE ra2.recovery_id = r.id AND ra2.contact_public_key = ?) AS alreadyApproved
+       FROM recoveries r
+       JOIN users u ON u.id = r.owner_id
+       WHERE r.owner_id = ? AND r.finalized = 0 AND r.cancelled = 0`
+    ).all(pub, contact.owner_id) as {
+      recoveryId: string;
+      ownerName: string | null;
+      unlockAt: number;
+      approvalCount: number;
+      alreadyApproved: number;
+    }[];
+
+    return {
+      recoveries: rows.map((r) => ({
+        recoveryId: r.recoveryId,
+        ownerName: r.ownerName ?? 'Questa persona',
+        unlockAt: r.unlockAt,
+        approvalCount: r.approvalCount,
+        alreadyApproved: r.alreadyApproved > 0,
+      })),
+    };
   });
 }
