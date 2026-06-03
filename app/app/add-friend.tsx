@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { View, Text } from 'react-native';
 import { router } from 'expo-router';
+import QRCode from 'react-native-qrcode-svg';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Screen, Card, Button, T } from '../components/ui';
 import { colors, space } from '../theme';
 import { api } from '../lib/api';
@@ -10,8 +12,6 @@ import {
 } from '../lib/keystore';
 import { registerPushToken } from '../lib/notifications';
 import { newSeedPhrase, identityFromSeed, safetyNumber, bytesToHex, hexToBytes } from '../lib/crypto';
-// import QRCode from 'react-native-qrcode-svg';            // TODO(device): abilitare
-// import { CameraView, useCameraPermissions } from 'expo-camera'; // TODO(device)
 
 // ── Macchina a stati del flusso ───────────────────────────────────────────────
 // Owner:   choose → owner_show_a → owner_scan_b → both_confirm → done
@@ -35,9 +35,31 @@ type QrB = { token: string; contactPublicKey: string };
 export default function AddFriend() {
   const [step, setStep]     = useState<Step>('choose');
   const [role, setRole]     = useState<Role | null>(null);
-  const [qrA, setQrA]       = useState<QrA | null>(null);   // payload che owner mostra
-  const [qrB, setQrB]       = useState<QrB | null>(null);   // payload che contatto mostra
+  const [qrA, setQrA]       = useState<QrA | null>(null);
+  const [qrB, setQrB]       = useState<QrB | null>(null);
   const [sn, setSn]         = useState<string | null>(null);
+
+  // Camera permission (hook must be at top level)
+  const [permission, requestPermission] = useCameraPermissions();
+
+  // Guard against onBarcodeScanned firing multiple times per frame
+  const alreadyScanned = useRef(false);
+
+  function enterScanStep(s: Step) {
+    alreadyScanned.current = false;
+    setStep(s);
+  }
+
+  function handleScan(raw: string, handler: (parsed: any) => void) {
+    if (alreadyScanned.current) return;
+    alreadyScanned.current = true;
+    try {
+      handler(JSON.parse(raw));
+    } catch {
+      alreadyScanned.current = false;
+      alert('QR non riconosciuto. Assicurati di scansionare il QR di Sentinella.');
+    }
+  }
 
   // ── OWNER passo 1: genera invito e mostra QR_A ─────────────────────────────
   async function startAsOwner() {
@@ -52,9 +74,9 @@ export default function AddFriend() {
   // ── OWNER passo 2: ha scansionato QR_B del contatto ───────────────────────
   async function ownerScannedB(payload: QrB) {
     if (!qrA) return;
-    const sn = safetyNumber(hexToBytes(qrA.ownerPublicKey), hexToBytes(payload.contactPublicKey));
+    const safeNum = safetyNumber(hexToBytes(qrA.ownerPublicKey), hexToBytes(payload.contactPublicKey));
     setQrB(payload);
-    setSn(sn);
+    setSn(safeNum);
     setStep('both_confirm');
   }
 
@@ -81,8 +103,8 @@ export default function AddFriend() {
   // ── CONTATTO passo 2: owner ha scansionato → calcola safety number ─────────
   function contactReadyToConfirm() {
     if (!qrA || !qrB) return;
-    const sn = safetyNumber(hexToBytes(qrA.ownerPublicKey), hexToBytes(qrB.contactPublicKey));
-    setSn(sn);
+    const safeNum = safetyNumber(hexToBytes(qrA.ownerPublicKey), hexToBytes(qrB.contactPublicKey));
+    setSn(safeNum);
     setStep('both_confirm');
   }
 
@@ -97,11 +119,36 @@ export default function AddFriend() {
       setStep('done');
     } catch (e: any) {
       if (e?.status === 404) {
-        alert('Invito non valido o già usato. Chiedi all\'owner un nuovo QR reale (i QR demo non funzionano).');
+        alert('Invito non valido o già usato. Chiedi all\'owner un nuovo QR.');
       } else {
         alert('Errore durante il pairing: ' + (e?.message ?? 'Errore sconosciuto'));
       }
     }
+  }
+
+  // ── Blocco fotocamera condiviso ───────────────────────────────────────────
+  // Inline per evitare re-mount inattesi; riusato nelle due fasi di scan.
+  function renderCamera(onScan: (raw: string) => void) {
+    if (!permission) {
+      return <Text style={T.dim}>Verifica permessi fotocamera…</Text>;
+    }
+    if (!permission.granted) {
+      return (
+        <View style={{ gap: space(3) }}>
+          <Text style={T.dim}>
+            L'app ha bisogno di accedere alla fotocamera per scansionare il QR.
+          </Text>
+          <Button label="Richiedi accesso fotocamera" onPress={requestPermission} />
+        </View>
+      );
+    }
+    return (
+      <CameraView
+        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+        onBarcodeScanned={(e) => onScan(e.data)}
+        style={{ height: 280, borderRadius: 12, overflow: 'hidden' }}
+      />
+    );
   }
 
   // ── RENDER ────────────────────────────────────────────────────────────────
@@ -116,7 +163,7 @@ export default function AddFriend() {
             Nessuna chiave passa solo dal server.
           </Text>
           <Button label="Sono io (owner): mostra il mio QR" onPress={startAsOwner} variant="safe" />
-          <Button label="Sono il contatto: scansiona il suo QR" onPress={() => setStep('contact_scan_a')} variant="ghost" />
+          <Button label="Sono il contatto: scansiona il suo QR" onPress={() => enterScanStep('contact_scan_a')} variant="ghost" />
         </>
       )}
 
@@ -124,18 +171,14 @@ export default function AddFriend() {
       {step === 'owner_show_a' && qrA && (
         <Card>
           <Text style={T.heading}>Fallo scansionare dal contatto</Text>
-          {/* TODO(device): <QRCode value={JSON.stringify(qrA)} size={240} /> */}
-          <View style={{ height: 240, alignItems: 'center', justifyContent: 'center',
-            backgroundColor: colors.surfaceAlt, borderRadius: 14 }}>
-            <Text style={{ ...T.mono, padding: space(4) }} numberOfLines={8}>
-              {JSON.stringify(qrA)}
-            </Text>
+          <View style={{ alignItems: 'center', backgroundColor: colors.surface, padding: space(5), borderRadius: 14 }}>
+            <QRCode value={JSON.stringify(qrA)} size={240} />
           </View>
           <Text style={T.dim}>
             Contiene il tuo token monouso e la tua chiave pubblica. Dopo che il contatto lo ha
             scansionato, lui ti mostrerà il suo QR.
           </Text>
-          <Button label="Il contatto ha mostrato il suo QR → scansionalo" onPress={() => setStep('owner_scan_b')} />
+          <Button label="Il contatto ha mostrato il suo QR → scansionalo" onPress={() => enterScanStep('owner_scan_b')} />
         </Card>
       )}
 
@@ -143,22 +186,7 @@ export default function AddFriend() {
       {step === 'owner_scan_b' && qrA && (
         <Card>
           <Text style={T.heading}>Scansiona il QR del contatto</Text>
-          {/* TODO(device):
-            <CameraView
-              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-              onBarcodeScanned={(e) => ownerScannedB(JSON.parse(e.data))}
-              style={{ height: 300, borderRadius: 12 }}
-            />
-          */}
-          <Text style={T.dim}>Camera disponibile su device fisico.</Text>
-          <Button
-            label="(demo) simula scan contatto"
-            variant="ghost"
-            onPress={() => ownerScannedB({
-              token: qrA.token,
-              contactPublicKey: '03c6babf68cf44f67447a9c66398705726c24ec2928091a9e40c076db138e0665a',
-            })}
-          />
+          {renderCamera((raw) => handleScan(raw, ownerScannedB))}
         </Card>
       )}
 
@@ -166,22 +194,17 @@ export default function AddFriend() {
       {step === 'contact_scan_a' && (
         <Card>
           <Text style={T.heading}>Scansiona il QR dell'owner</Text>
-          {/* TODO(device):
-            <CameraView
-              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-              onBarcodeScanned={(e) => contactScannedA(JSON.parse(e.data))}
-              style={{ height: 300, borderRadius: 12 }}
+          {renderCamera((raw) => handleScan(raw, contactScannedA))}
+          {__DEV__ && (
+            <Button
+              label="[DEV] simula scan owner"
+              variant="ghost"
+              onPress={() => contactScannedA({
+                token: 'DEMO_TOKEN_0000',
+                ownerPublicKey: '024ed395825486a3628176b579749981dca9927c319f6f7ad136d324931da0f661',
+              })}
             />
-          */}
-          <Text style={T.dim}>Camera disponibile su device fisico.</Text>
-          <Button
-            label="(demo) simula scan owner"
-            variant="ghost"
-            onPress={() => contactScannedA({
-              token: 'DEMO_TOKEN_0000',
-              ownerPublicKey: '024ed395825486a3628176b579749981dca9927c319f6f7ad136d324931da0f661',
-            })}
-          />
+          )}
         </Card>
       )}
 
@@ -189,12 +212,8 @@ export default function AddFriend() {
       {step === 'contact_show_b' && qrB && (
         <Card>
           <Text style={T.heading}>Ora mostra questo QR all'owner</Text>
-          {/* TODO(device): <QRCode value={JSON.stringify(qrB)} size={240} /> */}
-          <View style={{ height: 240, alignItems: 'center', justifyContent: 'center',
-            backgroundColor: colors.surfaceAlt, borderRadius: 14 }}>
-            <Text style={{ ...T.mono, padding: space(4) }} numberOfLines={8}>
-              {JSON.stringify(qrB)}
-            </Text>
+          <View style={{ alignItems: 'center', backgroundColor: colors.surface, padding: space(5), borderRadius: 14 }}>
+            <QRCode value={JSON.stringify(qrB)} size={240} />
           </View>
           <Text style={T.dim}>
             L'owner deve scansionare questo QR per verificare la tua chiave di persona.
@@ -236,7 +255,10 @@ export default function AddFriend() {
         <Card tone="danger">
           <Text style={T.heading}>Pairing annullato</Text>
           <Text style={T.dim}>
-            Le parole non coincidevano: nessuna chiave è stata salvata come verificata.
+            Possibile attacco intermediario. Riprova fisicamente con il contatto, non a distanza.
+          </Text>
+          <Text style={T.dim}>
+            Nessuna chiave è stata salvata come verificata.
           </Text>
           <Text style={T.dim}>
             Se il contatto ha già confermato dal suo lato, il server potrebbe aver già

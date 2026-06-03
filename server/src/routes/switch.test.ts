@@ -154,6 +154,25 @@ console.log('10) Produzione: preset Ogni 2 giorni (172800s) → 200');
   ok(res.statusCode === 200, `status 200 (ricevuto: ${res.statusCode})`);
 }
 
+// ── 9) Custom 60s in dev → DB ha esattamente interval_sec=60, grace_sec=60 ───
+console.log('9) Dev custom 60s: interval_sec=60 e grace_sec=60 nel DB — non i default 86400/21600');
+{
+  process.env['NODE_ENV'] = 'test';
+  const res = await app.inject({
+    method: 'POST', url: '/switch/create',
+    payload: { ownerId: 'usr_custom60', intervalSec: 60, graceSec: 60 },
+  });
+  const body = JSON.parse(res.payload) as any;
+  ok(res.statusCode === 200, `status 200 (ricevuto: ${res.statusCode})`);
+  ok(typeof body.switchId === 'string', `switchId presente`);
+
+  const sw = db.prepare('SELECT interval_sec, grace_sec FROM switches WHERE id=?').get(body.switchId) as any;
+  ok(sw?.interval_sec === 60,
+    `interval_sec=60 nel DB (ricevuto: ${sw?.interval_sec}) — non il default 86400`);
+  ok(sw?.grace_sec === 60,
+    `grace_sec=60 nel DB (ricevuto: ${sw?.grace_sec}) — non il default 21600`);
+}
+
 // Helper: crea uno switch ACTIVE con un contenuto iniziale in switch_contents.
 async function mkActiveWithContent(ownerId: string, ptr = 'ptr-0', iv = 'iv-0', label = 'Test') {
   process.env['NODE_ENV'] = 'test';

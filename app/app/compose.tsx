@@ -258,11 +258,12 @@ export default function Compose() {
       const { nonce, ct } = encryptWithKey(dek, new TextEncoder().encode(manifest));
       setUploadStep('Caricamento manifesto…');
       const drivePointer = await uploadEncrypted(ct);
-      let switchId = await loadSwitchId();
-      if (!switchId) {
-        const r = await api.createSwitch(ownerId, intervalSec, graceSec);
-        switchId = r.switchId; await saveSwitchId(switchId);
+      const oldSwitchId = await loadSwitchId();
+      if (oldSwitchId) {
+        try { await api.disarm(oldSwitchId); } catch { /* best effort: pulisce lo switch precedente */ }
       }
+      const { switchId } = await api.createSwitch(ownerId, intervalSec, graceSec);
+      await saveSwitchId(switchId);
       await saveDek(switchId, bytesToHex(dek));
       const shares = splitSecret(dek, recipients.length, threshold);
       const real = recipients.map((c, i) => ({ x: shares[i].x, blob: sealShare(hexToBytes(c.public_key), shares[i]) }));
@@ -414,6 +415,11 @@ export default function Compose() {
                   </View>
                 </View>
               )}
+              {intervalPreset === 'custom' && (
+                <Text style={{ fontSize: 12, color: intervalSec >= limits.intervalMin ? colors.inkFaint : colors.danger }}>
+                  = {intervalSec > 0 ? `${formatDuration(intervalSec)} (${intervalSec} s)` : '—'} · verrà inviato al server
+                </Text>
+              )}
               {intervalPreset !== 'custom' && (
                 <Text style={{ fontSize: 12, color: colors.inkFaint }}>
                   Il server ti contatta ogni {formatDuration(intervalSec)} se non rispondi
@@ -438,7 +444,7 @@ export default function Compose() {
                 </View>
               </View>
               <Text style={{ fontSize: 12, color: colors.inkFaint }}>
-                Hai {formatDuration(graceSec)} per rispondere prima che i contatti ricevano l'allerta
+                Hai {formatDuration(graceSec)} ({graceSec} s) per rispondere prima che i contatti ricevano l'allerta
               </Text>
             </View>
 

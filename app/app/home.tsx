@@ -5,6 +5,7 @@ import { Screen, Card, Button, Pill, T } from '../components/ui';
 import { colors, space } from '../theme';
 import { api } from '../lib/api';
 import { loadOwnerId, loadSwitchId } from '../lib/keystore';
+import { formatDuration } from '../lib/timing';
 
 const STATE_LABEL: Record<string, { label: string; tone: 'safe' | 'heartbeat' | 'danger' | 'neutral' }> = {
   ACTIVE: { label: 'ARMATO', tone: 'safe' },
@@ -80,6 +81,11 @@ export default function Home() {
             {(sw.state === 'ACTIVE' || sw.state === 'GRACE') && (
               <Text style={{ fontSize: 44, fontWeight: '800', color: colors.ink, letterSpacing: -1 }}>
                 {Math.floor(remaining / 60)}m {remaining % 60}s
+              </Text>
+            )}
+            {sw.state === 'ACTIVE' && sw.interval_sec && (
+              <Text style={{ fontSize: 12, color: colors.inkFaint }}>
+                ogni {formatDuration(sw.interval_sec)} · grazia {formatDuration(sw.grace_sec)}
               </Text>
             )}
             {(sw.state === 'ACTIVE' || sw.state === 'GRACE') && (
