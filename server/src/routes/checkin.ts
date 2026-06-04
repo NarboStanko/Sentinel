@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { db, audit } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { appendToChain } from '../services/auditChain.js';
 import { validateBody, checkinSchema } from '../middleware/validate.js';
 
 // +/- 15% di jitter sull'intervallo: rende meno leggibile il ritmo dei check-in.
@@ -22,6 +23,7 @@ export async function checkinRoutes(app: FastifyInstance) {
       db.prepare("UPDATE switches SET state='ACTIVE', last_checkin=?, next_check_at=? WHERE id=?")
         .run(now, next, req.body.switchId);
       audit(req.body.switchId, 'CHECKIN_OK');
+      try { appendToChain({ chain_owner_id: req.actor!.id, event_type: 'CHECKIN_OK', actor_id: req.actor!.id, payload: { switchId: req.body.switchId }, signature: req.body.sig }); } catch (e) { console.error('auditChain CHECKIN_OK', e); }
       return { ok: true, nextCheckAt: next };
     }
   );

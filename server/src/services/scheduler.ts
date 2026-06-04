@@ -1,5 +1,6 @@
 import { db, audit } from '../db.js';
 import { sendPush, checkinPush, approvalPush } from './pushSender.js';
+import { appendToChain } from './auditChain.js';
 
 type Logger = { info: Function; warn: Function };
 type PushFn  = (msgs: ReturnType<typeof checkinPush>[], log?: Logger) => void | Promise<void>;
@@ -26,6 +27,7 @@ export function tick(now: number, log: Logger, pushFn: PushFn = sendPush) {
       const owner = db.prepare('SELECT push_token FROM users WHERE id=?').get(sw.owner_id) as any;
       if (owner?.push_token) pushFn([checkinPush(owner.push_token)], log);
       audit(sw.id, 'CHECK_PENDING');
+      try { appendToChain({ chain_owner_id: sw.owner_id, event_type: 'CHECK_PENDING', actor_id: null, payload: { switchId: sw.id }, signature: null }); } catch (e) { console.error('auditChain CHECK_PENDING', e); }
       log.info({ sw: sw.id }, 'GRACE: richiesta check-in inviata');
     } else if (sw.state === 'GRACE' && now >= sw.next_check_at) {
       // Nessuna risposta: chiedi l'approvazione ai contatti.
@@ -39,6 +41,7 @@ export function tick(now: number, log: Logger, pushFn: PushFn = sendPush) {
         .map((c) => approvalPush(c.push_token, owner?.display_name ?? 'Questa persona'));
       if (msgs.length) pushFn(msgs, log);
       audit(sw.id, 'APPROVAL_REQUESTED');
+      try { appendToChain({ chain_owner_id: sw.owner_id, event_type: 'APPROVAL_REQUESTED', actor_id: null, payload: { switchId: sw.id }, signature: null }); } catch (e) { console.error('auditChain APPROVAL_REQUESTED', e); }
       log.warn({ sw: sw.id }, 'APPROVAL_PENDING: richieste inviate ai contatti');
     }
   }

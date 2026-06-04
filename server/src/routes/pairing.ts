@@ -6,6 +6,7 @@ import { p256 } from '@noble/curves/p256';
 import { sha256 } from '@noble/hashes/sha256';
 import { hexToBytes } from '@noble/hashes/utils';
 import { requireAuth } from '../middleware/auth.js';
+import { appendToChain } from '../services/auditChain.js';
 import {
   validateBody,
   ownerRegisterSchema, inviteSchema, pairSchema,
@@ -100,6 +101,10 @@ export async function pairingRoutes(app: FastifyInstance) {
       ).run(contactId, inv.owner_id, req.body.contactPublicKey, req.body.pushToken ?? null, toHash, Date.now());
       db.prepare('UPDATE invites SET used = 1 WHERE token = ?').run(req.body.token);
       audit(null, 'CONTACT_PAIRED');
+      try {
+        appendToChain({ chain_owner_id: inv.owner_id, event_type: 'CONTACT_PAIRED', actor_id: null, payload: { contactId, contactPublicKey: req.body.contactPublicKey }, signature: null });
+        appendToChain({ chain_owner_id: contactId, event_type: 'BECAME_CONTACT_OF', actor_id: null, payload: { ownerId: inv.owner_id }, signature: null });
+      } catch (e) { console.error('auditChain CONTACT_PAIRED', e); }
       // Il contatto ha già la chiave dell'owner (dal QR). Ora l'owner ha quella del contatto.
       return { contactId };
     }
@@ -140,8 +145,8 @@ export async function pairingRoutes(app: FastifyInstance) {
     }
 
     // Cerca prima il contatto per id, poi verifica che la chiave fornita corrisponda
-    const contact = db.prepare('SELECT id, public_key FROM contacts WHERE id = ?')
-      .get(contactId) as { id: string; public_key: string } | undefined;
+    const contact = db.prepare('SELECT id, public_key, owner_id FROM contacts WHERE id = ?')
+      .get(contactId) as { id: string; public_key: string; owner_id: string } | undefined;
     if (!contact) return reply.code(404).send({ error: 'contatto_non_trovato', message: 'Contatto non trovato.' });
 
     // La chiave fornita deve corrispondere a quella memorizzata; altrimenti è una chiave sbagliata
@@ -155,6 +160,7 @@ export async function pairingRoutes(app: FastifyInstance) {
 
     db.prepare('DELETE FROM contacts WHERE id = ?').run(contactId);
     audit(null, 'CONTACT_REJECTED');
+    try { appendToChain({ chain_owner_id: contact.owner_id, event_type: 'CONTACT_REJECTED', actor_id: contact.owner_id, payload: { contactId }, signature: sig }); } catch (e) { console.error('auditChain CONTACT_REJECTED', e); }
     return { ok: true };
   });
 
@@ -196,6 +202,10 @@ export async function pairingRoutes(app: FastifyInstance) {
     // Elimina il contatto. Le quote Shamir non hanno contact_id (invariante di anonimità):
     // non è possibile eliminarle per contatto. Puliamo le quote delle switch DISARMED/RELEASED
     // dello stesso owner (dati morti che non servono più a nessuno).
+    try {
+      appendToChain({ chain_owner_id: contactId, event_type: 'REMOVED_AS_CONTACT', actor_id: contact.owner_id, payload: { ownerId: contact.owner_id, force: !!force }, signature: sig });
+      appendToChain({ chain_owner_id: contact.owner_id, event_type: force ? 'CONTACT_FORCE_REMOVED' : 'CONTACT_REMOVED', actor_id: contact.owner_id, payload: { contactId, force: !!force }, signature: sig });
+    } catch (e) { console.error('auditChain CONTACT_REMOVED', e); }
     db.prepare('DELETE FROM contacts WHERE id = ?').run(contactId);
     const dormantIds = (db.prepare(
       "SELECT id FROM switches WHERE owner_id = ? AND state IN ('DISARMED','RELEASED')"
@@ -246,6 +256,7 @@ export async function pairingRoutes(app: FastifyInstance) {
 
     db.prepare('UPDATE contacts SET public_key = ? WHERE id = ?').run(newPublicKey, contactId);
     audit(null, 'CONTACT_KEY_ROTATED');
+    try { appendToChain({ chain_owner_id: contact.owner_id, event_type: 'CONTACT_KEY_ROTATED', actor_id: contact.owner_id, payload: { contactId, newPublicKey }, signature: sig }); } catch (e) { console.error('auditChain CONTACT_KEY_ROTATED', e); }
     return { ok: true };
   });
 }

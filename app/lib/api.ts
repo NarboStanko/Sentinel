@@ -127,6 +127,18 @@ export const api = {
   rotateContactKey: (contactId: string, newPublicKey: string, ownerPub: string, ts: number, sig: string) =>
     req<{ ok: boolean }>(`/contacts/${contactId}`, 'PUT', { ownerPub, ts, sig, newPublicKey }),
 
+  // audit chain endpoints
+  auditAnchor: (ownerId: string, pub: string, ts: number, sig: string) =>
+    req<{ ownerId: string; chainIndex: number; hash: string; timestamp_ms: number | null }>(
+      `/audit/anchor?ownerId=${encodeURIComponent(ownerId)}&pub=${encodeURIComponent(pub)}&ts=${ts}&sig=${encodeURIComponent(sig)}`
+    ),
+  auditEvents: (ownerId: string, fromIndex: number, toIndex: number, pub: string, ts: number, sig: string) =>
+    req<{ events: any[] }>(
+      `/audit/events?ownerId=${encodeURIComponent(ownerId)}&fromIndex=${fromIndex}&toIndex=${toIndex}&pub=${encodeURIComponent(pub)}&ts=${ts}&sig=${encodeURIComponent(sig)}`
+    ),
+  auditAnchorEvent: (eventType: 'ANCHOR_SAVED' | 'VERIFICATION_FAILED', metadata: Record<string, unknown>) =>
+    signedReq<{ ok: boolean }>('/audit/anchor-event', 'POST', { eventType, metadata }),
+
   // ── SOLO SVILUPPO (NODE_ENV !== 'production' lato server) ─────────────────
   // Crea 2 contatti fittizi sul server e restituisce le loro chiavi pubbliche.
   // L'app le salva come "verificate" solo per superare il controllo compose.

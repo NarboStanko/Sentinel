@@ -3,6 +3,7 @@ import { db } from '../db.js';
 import { p256 } from '@noble/curves/p256';
 import { sha256 } from '@noble/hashes/sha256';
 import { hexToBytes } from '@noble/curves/abstract/utils';
+import { sortDeep } from '../lib/canonical.js';
 
 export type ActorType = 'owner' | 'contact' | 'owner-of-switch' | 'contact-of-switch';
 export interface Actor { type: ActorType; id: string; pub: string; }
@@ -36,18 +37,6 @@ export function clearNonceCache(): void {
 
 // DEVE essere identica a app/lib/canonicalize.ts canonicalize().
 // Modificare entrambe insieme. Test in server/src/routes/auth.test.ts verifica l'equivalenza.
-function sortDeep(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortDeep);
-  if (value !== null && typeof value === 'object') {
-    const sorted: Record<string, unknown> = {};
-    for (const k of Object.keys(value as Record<string, unknown>).sort()) {
-      sorted[k] = sortDeep((value as Record<string, unknown>)[k]);
-    }
-    return sorted;
-  }
-  return value;
-}
-
 export function canonicalize(
   method: string,
   urlPath: string,

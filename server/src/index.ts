@@ -12,6 +12,7 @@ import { pendingRoutes } from './routes/pending.js';
 import { devBlobRoutes } from './routes/devblob.js';
 import { debugRoutes } from './routes/debug.js';
 import { auditRoutes } from './routes/audit.js';
+import { auditChainRoutes } from './routes/audit_chain.js';
 import { startScheduler } from './services/scheduler.js';
 import { registerIpRateLimitHook, cleanupExpiredEntries } from './services/rateLimiter.js';
 
@@ -71,6 +72,7 @@ await app.register(approvalRoutes);
 await app.register(pushRoutes);
 await app.register(pendingRoutes);
 await app.register(auditRoutes);
+await app.register(auditChainRoutes);
 await app.register(devBlobRoutes); // dev only
 await app.register(debugRoutes);  // dev only (no-op in production)
 

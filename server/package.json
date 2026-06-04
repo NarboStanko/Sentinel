@@ -15,7 +15,8 @@
     "test:contacts": "tsx src/routes/contacts.test.ts",
     "test:ratelimit": "tsx src/routes/ratelimit.test.ts",
     "test:auth": "tsx src/routes/auth.test.ts",
-    "test:errorhandler": "tsx src/routes/errorhandler.test.ts"
+    "test:errorhandler": "tsx src/routes/errorhandler.test.ts",
+    "test:audit_chain": "tsx src/routes/audit_chain.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

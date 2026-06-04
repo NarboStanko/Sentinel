@@ -95,6 +95,21 @@ CREATE TABLE IF NOT EXISTS audit (
   at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS audit_chain (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  chain_owner_id TEXT    NOT NULL,
+  chain_index    INTEGER NOT NULL,
+  event_type     TEXT    NOT NULL,
+  actor_id       TEXT,
+  payload        TEXT    NOT NULL DEFAULT '{}',
+  timestamp_ms   INTEGER NOT NULL,
+  signature      TEXT,
+  prev_hash      TEXT    NOT NULL,
+  hash           TEXT    NOT NULL,
+  UNIQUE(chain_owner_id, chain_index)
+);
+CREATE INDEX IF NOT EXISTS idx_audit_chain_owner ON audit_chain(chain_owner_id, chain_index);
+
 -- Contatori per il rate limiting. Chiavi: ip:{ip}, submit:{switchId}:{ip},
 -- cumul:{switchId}:{ip} (cumulativo lifetme), lockout:{switchId}:{ip},
 -- lockout_window:{switchId}:{ip}.

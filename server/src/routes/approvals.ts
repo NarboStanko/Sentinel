@@ -8,6 +8,7 @@ import {
 } from '../services/rateLimiter.js';
 import { getLimits } from '../config/limits.js';
 import { requireAuth } from '../middleware/auth.js';
+import { appendToChain } from '../services/auditChain.js';
 import { validateBody, approvalSubmitSchema, releaseConfirmSchema } from '../middleware/validate.js';
 
 // SOGLIA + OCCULTAMENTO (k nascosto al server)
@@ -61,6 +62,7 @@ export async function approvalRoutes(app: FastifyInstance) {
       const { switchId, share } = req.body;
       const actorId = req.actor!.id;   // contact_id verificato dal middleware
       const limits = getLimits();
+      const switchOwner = db.prepare('SELECT owner_id FROM switches WHERE id = ?').get(switchId) as { owner_id: string } | undefined;
 
       // 1. Check lockout da pattern sospetto (prevale sul limite normale)
       const lockout = checkSuspiciousLockout(actorId, switchId);
@@ -98,9 +100,11 @@ export async function approvalRoutes(app: FastifyInstance) {
       ).run(JSON.stringify(share), switchId, share.x);
       if (info.changes === 0) {
         audit(switchId, 'SHARE_OVERWRITE_ATTEMPTED');
+        if (switchOwner) try { appendToChain({ chain_owner_id: switchOwner.owner_id, event_type: 'SHARE_OVERWRITE_ATTEMPTED', actor_id: actorId, payload: { switchId, x: share.x }, signature: req.body.sig }); } catch (e) { console.error('auditChain SHARE_OVERWRITE_ATTEMPTED', e); }
         return reply.code(409).send({ error: 'share_gia_sottomessa', message: 'Quota già inviata per questo indice.' });
       }
       audit(switchId, 'SHARE_SUBMITTED');
+      if (switchOwner) try { appendToChain({ chain_owner_id: switchOwner.owner_id, event_type: 'SHARE_SUBMITTED', actor_id: actorId, payload: { switchId, x: share.x }, signature: req.body.sig }); } catch (e) { console.error('auditChain SHARE_SUBMITTED', e); }
       const submitted = db.prepare(
         'SELECT submitted_share FROM shares WHERE switch_id = ? AND submitted_share IS NOT NULL'
       ).all(switchId) as { submitted_share: string }[];
@@ -113,9 +117,11 @@ export async function approvalRoutes(app: FastifyInstance) {
     '/release/confirm',
     { preHandler: [requireAuth('contact-of-switch'), validateBody(releaseConfirmSchema)] },
     async (req) => {
+      const releaseSwitchOwner = db.prepare('SELECT owner_id FROM switches WHERE id = ?').get(req.body.switchId) as { owner_id: string } | undefined;
       db.prepare("UPDATE switches SET state='RELEASED' WHERE id=? AND state='APPROVAL_PENDING'")
         .run(req.body.switchId);
       audit(req.body.switchId, 'RELEASED');
+      if (releaseSwitchOwner) try { appendToChain({ chain_owner_id: releaseSwitchOwner.owner_id, event_type: 'RELEASED', actor_id: req.actor!.id, payload: { switchId: req.body.switchId }, signature: req.body.sig }); } catch (e) { console.error('auditChain RELEASED', e); }
       clearCumulativeOnRelease(req.body.switchId);
       return { ok: true };
     }

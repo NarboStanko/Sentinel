@@ -6,6 +6,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import { hexToBytes } from '@noble/hashes/utils';
 import { sendPush, recoveryPush } from '../services/pushSender.js';
 import { requireAuth } from '../middleware/auth.js';
+import { appendToChain } from '../services/auditChain.js';
 import {
   validateBody,
   recoveryInitiateSchema, recoveryApproveSchema,
@@ -42,6 +43,7 @@ export async function recoveryRoutes(app: FastifyInstance) {
       db.prepare('INSERT INTO recoveries (id, owner_id, new_public_key, unlock_at, created_at) VALUES (?,?,?,?,?)')
         .run(id, ownerId, newPublicKey, unlockAt, Date.now());
       audit(null, 'ROTATION_REQUESTED');
+      try { appendToChain({ chain_owner_id: ownerId, event_type: 'ROTATION_REQUESTED', actor_id: null, payload: { recoveryId: id, newPublicKey, unlockAt }, signature: null }); } catch (e) { console.error('auditChain ROTATION_REQUESTED', e); }
 
       // Invia push ai contatti fidati (senza segreti: solo «apri l'app»)
       const owner = db.prepare('SELECT display_name FROM users WHERE id = ?').get(ownerId) as
@@ -77,6 +79,7 @@ export async function recoveryRoutes(app: FastifyInstance) {
       db.prepare('INSERT OR IGNORE INTO recovery_approvals (recovery_id, contact_public_key, created_at) VALUES (?,?,?)')
         .run(recoveryId, contactPublicKey, Date.now());
       audit(null, 'ROTATION_APPROVED');
+      try { appendToChain({ chain_owner_id: rec.owner_id, event_type: 'ROTATION_APPROVED', actor_id: req.actor!.id, payload: { recoveryId }, signature: req.body.sig }); } catch (e) { console.error('auditChain ROTATION_APPROVED', e); }
       const n = db.prepare('SELECT COUNT(*) AS n FROM recovery_approvals WHERE recovery_id = ?').get(recoveryId) as { n: number };
       return { ok: true, approvals: n.n };
     }
@@ -102,6 +105,7 @@ export async function recoveryRoutes(app: FastifyInstance) {
     db.prepare('UPDATE users SET public_key = ? WHERE id = ?').run(rec.new_public_key, rec.owner_id);
     db.prepare('UPDATE recoveries SET finalized = 1 WHERE id = ?').run(req.body.recoveryId);
     audit(null, 'ROTATION_COMPLETED');
+    try { appendToChain({ chain_owner_id: rec.owner_id, event_type: 'ROTATION_COMPLETED', actor_id: null, payload: { recoveryId: req.body.recoveryId, newPublicKey: rec.new_public_key }, signature: null }); } catch (e) { console.error('auditChain ROTATION_COMPLETED', e); }
     return { ok: true };
   });
 
@@ -118,6 +122,7 @@ export async function recoveryRoutes(app: FastifyInstance) {
     if (!ok) return { ok: false, reason: 'firma non valida' };
     db.prepare('UPDATE recoveries SET cancelled = 1 WHERE id = ?').run(req.body.recoveryId);
     audit(null, 'ROTATION_CANCELLED');
+    try { appendToChain({ chain_owner_id: rec.owner_id, event_type: 'ROTATION_CANCELLED', actor_id: null, payload: { recoveryId: req.body.recoveryId }, signature: req.body.sig }); } catch (e) { console.error('auditChain ROTATION_CANCELLED', e); }
     return { ok: true };
   });
 

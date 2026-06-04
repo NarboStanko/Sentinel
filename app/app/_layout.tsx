@@ -95,8 +95,11 @@ export default function Layout() {
       <Stack.Screen name="approve"         options={{ title: 'Richiesta di rilascio' }} />
       <Stack.Screen name="restore"         options={{ title: 'Ripristina account' }} />
       <Stack.Screen name="backup"          options={{ title: 'Backup seed' }} />
-      <Stack.Screen name="social-recovery" options={{ title: 'Recovery identità' }} />
-      <Stack.Screen name="verify-seed"     options={{ title: 'Verifica seed' }} />
+      <Stack.Screen name="social-recovery"  options={{ title: 'Recovery identità' }} />
+      <Stack.Screen name="verify-seed"      options={{ title: 'Verifica seed' }} />
+      <Stack.Screen name="audit-tools"      options={{ title: 'Strumenti di verifica' }} />
+      <Stack.Screen name="verify-failed"    options={{ title: 'Verifica integrità' }} />
+      <Stack.Screen name="recovery-confirm" options={{ title: 'Conferma recovery' }} />
     </Stack>
   );
 }

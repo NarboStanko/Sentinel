@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { db, audit } from '../db.js';
 import { withJitter } from './checkin.js';
 import { requireAuth } from '../middleware/auth.js';
+import { appendToChain } from '../services/auditChain.js';
 import {
   validateBody,
   switchCreateSchema, switchArmSchema, addContentSchema,
@@ -89,6 +90,7 @@ export async function switchRoutes(app: FastifyInstance) {
         `UPDATE switches SET state='ACTIVE', last_checkin=?, next_check_at=?, armed_at=? WHERE id=?`
       ).run(now, now + withJitter(sw.interval_sec) * 1000, now, switchId);
       audit(switchId, 'ARMED');
+      try { appendToChain({ chain_owner_id: req.actor!.id, event_type: 'ARMED', actor_id: req.actor!.id, payload: { switchId }, signature: req.body.sig }); } catch (e) { console.error('auditChain ARMED', e); }
 
       if (typeof recoveryK === 'number' && recoveryK >= 1) {
         const owner = db.prepare('SELECT owner_id FROM switches WHERE id = ?').get(switchId) as { owner_id: string } | undefined;
@@ -123,6 +125,7 @@ export async function switchRoutes(app: FastifyInstance) {
         'UPDATE switches SET last_checkin=?, next_check_at=? WHERE id=?'
       ).run(now, nextCheckAt, switchId);
       audit(switchId, 'CONTENT_ADDED');
+      try { appendToChain({ chain_owner_id: req.actor!.id, event_type: 'CONTENT_ADDED', actor_id: req.actor!.id, payload: { switchId, contentId }, signature: req.body.sig }); } catch (e) { console.error('auditChain CONTENT_ADDED', e); }
       return { ok: true, contentId, nextCheckAt };
     }
   );
@@ -155,6 +158,7 @@ export async function switchRoutes(app: FastifyInstance) {
       db.prepare('UPDATE switches SET last_checkin=?, next_check_at=? WHERE id=?')
         .run(now, nextCheckAt, switchId);
       audit(switchId, 'CONTENT_REMOVED');
+      try { appendToChain({ chain_owner_id: req.actor!.id, event_type: 'CONTENT_REMOVED', actor_id: req.actor!.id, payload: { switchId, contentId }, signature: req.body.sig }); } catch (e) { console.error('auditChain CONTENT_REMOVED', e); }
       return { ok: true, nextCheckAt };
     }
   );
@@ -179,6 +183,7 @@ export async function switchRoutes(app: FastifyInstance) {
       db.prepare('DELETE FROM shares WHERE switch_id = ?').run(req.body.switchId);
       db.prepare('DELETE FROM switch_contents WHERE switch_id = ?').run(req.body.switchId);
       audit(req.body.switchId, 'DISARMED');
+      try { appendToChain({ chain_owner_id: req.actor!.id, event_type: 'DISARMED', actor_id: req.actor!.id, payload: { switchId: req.body.switchId }, signature: req.body.sig }); } catch (e) { console.error('auditChain DISARMED', e); }
       return { ok: true };
     }
   );

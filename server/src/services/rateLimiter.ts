@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { db, audit } from '../db.js';
 import { getLimits } from '../config/limits.js';
+import { appendToChain } from './auditChain.js';
 
 function currentWindow(windowMs: number): number {
   return Math.floor(Date.now() / windowMs) * windowMs;
@@ -103,6 +104,8 @@ export function trackCumulativeSubmit(actorId: string, switchId: string): void {
     db.prepare('INSERT OR REPLACE INTO rate_limits (key, count, window_start) VALUES (?, 1, ?)')
       .run(windowKey, currentWindow(3_600_000));
     audit(switchId, 'SUSPICIOUS_SUBMIT_PATTERN');
+    const suspOwner = db.prepare('SELECT owner_id FROM switches WHERE id = ?').get(switchId) as { owner_id: string } | undefined;
+    if (suspOwner) try { appendToChain({ chain_owner_id: suspOwner.owner_id, event_type: 'SUSPICIOUS_SUBMIT_PATTERN', actor_id: actorId, payload: { switchId }, signature: null }); } catch (e) { console.error('auditChain SUSPICIOUS_SUBMIT_PATTERN', e); }
   }
 }
 
