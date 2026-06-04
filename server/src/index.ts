@@ -24,12 +24,13 @@ const app = Fastify({ logger: true, bodyLimit: BODY_LIMIT, trustProxy: true });
 await app.register(cors, { origin: true });
 registerIpRateLimitHook(app);
 
-// Logga sempre lo stack server-side; espone solo un messaggio sicuro al client.
-// Le route devono usare reply.code(4xx).send({error,message}) per errori di input,
-// non throw — questo handler è per bug inattesi.
-// FST_ERR_CTP_BODY_TOO_LARGE transita da qui: rimanda 413 con messaggio leggibile
-// invece di cadere nel catch-all 500.
-app.setErrorHandler((err, _req, reply) => {
+// Codici HTTP 4xx: errori di input client — passano al chiamante con error+message.
+// Qualsiasi altro status (inclusi i 5xx inattesi): logga lo stack server-side,
+// espone solo { error:'internal_error' } senza dettagli.
+// FST_ERR_CTP_BODY_TOO_LARGE (413) ha un messaggio leggibile dedicato.
+const CLIENT_STATUS = new Set([400, 401, 403, 404, 405, 409, 413, 415, 422, 429]);
+
+app.setErrorHandler((err, req, reply) => {
   const status = (err as any).statusCode ?? 500;
   if (status === 413) {
     return reply.code(413).send({
@@ -37,8 +38,25 @@ app.setErrorHandler((err, _req, reply) => {
       message: `Payload troppo grande. Limite server: ${BODY_LIMIT / 1024 / 1024} MB.`,
     });
   }
-  app.log.error(err);
+  if (CLIENT_STATUS.has(status)) {
+    return reply.code(status).send({
+      error: (err as any).code ?? 'request_error',
+      message: err.message,
+    });
+  }
+  req.log.error(err);
   reply.code(500).send({ error: 'internal_error', message: 'Errore interno del server.' });
+});
+
+// Header di sicurezza su ogni risposta. HSTS solo su HTTPS.
+app.addHook('onSend', async (req, reply) => {
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('X-Frame-Options', 'DENY');
+  reply.header('Referrer-Policy', 'no-referrer');
+  reply.header('Content-Security-Policy', "default-src 'self'");
+  if (req.protocol === 'https') {
+    reply.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
+  }
 });
 
 app.get('/health', async () => ({ ok: true, service: 'sentinella', ts: Date.now() }));

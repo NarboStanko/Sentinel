@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { validateBody, pushRegisterSchema } from '../middleware/validate.js';
 
 // Verifica dinamica: owner o contact, in base al campo role nel body.
 // Dopo la verifica generica, controlla che body.id === actor.id per prevenire
@@ -25,7 +26,7 @@ async function requirePushAuth(req: FastifyRequest, reply: FastifyReply): Promis
 export async function pushRoutes(app: FastifyInstance) {
   app.post<{ Body: { role: 'owner' | 'contact'; id: string; pushToken: string; pub: string; ts: number; sig: string } }>(
     '/push/register',
-    { preHandler: [requirePushAuth] },
+    { preHandler: [requirePushAuth, validateBody(pushRegisterSchema)] },
     async (req, reply) => {
       const { role, id, pushToken } = req.body;
       const table = role === 'owner' ? 'users' : 'contacts';

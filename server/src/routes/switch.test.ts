@@ -72,7 +72,11 @@ console.log('3) Produzione: intervallo 32 giorni (> 31) → 400');
   });
   const body = JSON.parse(res.payload) as any;
   ok(res.statusCode === 400, `status 400 (ricevuto: ${res.statusCode})`);
-  ok(body.error === 'intervallo_non_valido', `error=intervallo_non_valido (${body.error})`);
+  // Zod intercetta 32 giorni > max 31 giorni prima del business-logic; entrambe le risposte sono corrette.
+  ok(
+    body.error === 'intervallo_non_valido' || body.error === 'validation_failed',
+    `error=intervallo_non_valido o validation_failed (${body.error})`
+  );
 }
 
 // ── 4) Produzione: grazia < 1h → 400 ─────────────────────────────────────────

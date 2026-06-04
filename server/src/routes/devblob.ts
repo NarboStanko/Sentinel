@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
+import { validateBody, devBlobSchema } from '../middleware/validate.js';
 
 // ⚠️ SOLO SVILUPPO. Conserva il ciphertext in memoria per testare il flusso e2e.
 // In produzione: disabilitato. Il server NON deve mai possedere il contenuto
@@ -13,7 +14,7 @@ export async function devBlobRoutes(app: FastifyInstance) {
   }
   app.log.warn('[devblob] /dev/blob attivo (solo sviluppo) — non usare in produzione');
 
-  app.post<{ Body: { data: string } }>('/dev/blob', async (req) => {
+  app.post<{ Body: { data: string } }>('/dev/blob', { preHandler: [validateBody(devBlobSchema)] }, async (req) => {
     const pointer = 'drive://dev/' + nanoid(10);
     blobs.set(pointer, req.body.data);
     return { pointer };

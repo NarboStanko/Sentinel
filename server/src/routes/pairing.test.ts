@@ -44,10 +44,11 @@ const app = await buildApp();
 // ── 1) /pair con token inesistente → 404 ──────────────────────────────────
 console.log('1) /pair — token inesistente → 404');
 {
+  const validPub = '02' + '0'.repeat(64);
   const res = await app.inject({
     method: 'POST',
     url: '/pair',
-    payload: { token: 'TOKEN_CHE_NON_ESISTE', contactPublicKey: '04abcd1234' },
+    payload: { token: 'TOKEN_CHE_NON_ESISTE', contactPublicKey: validPub },
   });
   const body = JSON.parse(res.payload) as Record<string, unknown>;
   ok(res.statusCode === 404, `status 404 (ricevuto: ${res.statusCode})`);
@@ -82,7 +83,7 @@ console.log('2) /pair — token già usato → 404');
   const first = await app.inject({
     method: 'POST',
     url: '/pair',
-    payload: { token, contactPublicKey: '04contact_key_01' },
+    payload: { token, contactPublicKey: '02' + 'a'.repeat(64) },
   });
   ok(first.statusCode === 200, `primo /pair: 200 (ricevuto: ${first.statusCode})`);
 
@@ -90,7 +91,7 @@ console.log('2) /pair — token già usato → 404');
   const second = await app.inject({
     method: 'POST',
     url: '/pair',
-    payload: { token, contactPublicKey: '04contact_key_02' },
+    payload: { token, contactPublicKey: '02' + 'b'.repeat(64) },
   });
   const body = JSON.parse(second.payload) as Record<string, unknown>;
   ok(second.statusCode === 404, `secondo /pair: 404 (ricevuto: ${second.statusCode})`);

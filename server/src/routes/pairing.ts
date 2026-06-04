@@ -6,6 +6,11 @@ import { p256 } from '@noble/curves/p256';
 import { sha256 } from '@noble/hashes/sha256';
 import { hexToBytes } from '@noble/hashes/utils';
 import { requireAuth } from '../middleware/auth.js';
+import {
+  validateBody,
+  ownerRegisterSchema, inviteSchema, pairSchema,
+  rejectSchema, removeContactSchema, rotateContactKeySchema,
+} from '../middleware/validate.js';
 
 // Verifica firma timestampata (window 5 min, previene replay).
 // challenge deve includere ts come parte del messaggio firmato dall'app via signChallenge.
@@ -32,6 +37,7 @@ export async function pairingRoutes(app: FastifyInstance) {
   // ── Registrazione owner ──────────────────────────────────────────────────────
   app.post<{ Body: { displayName?: string; publicKey: string } }>(
     '/owner/register',
+    { preHandler: [validateBody(ownerRegisterSchema)] },
     async (req) => {
       const id = 'usr_' + nanoid(10);
       db.prepare('INSERT INTO users (id, display_name, public_key, created_at) VALUES (?,?,?,?)')
@@ -45,7 +51,7 @@ export async function pairingRoutes(app: FastifyInstance) {
   // ownerId è derivato da req.actor.id; body.ownerId (se presente) è validato per coerenza.
   app.post<{ Body: { pub: string; ts: number; sig: string; ownerId?: string } }>(
     '/invite',
-    { preHandler: [requireAuth('owner')] },
+    { preHandler: [requireAuth('owner'), validateBody(inviteSchema)] },
     async (req, reply) => {
       const ownerId = req.actor!.id;
       // Sanity-check opzionale: se il client invia ownerId, deve coincidere con l'actor
@@ -66,6 +72,7 @@ export async function pairingRoutes(app: FastifyInstance) {
   // ── Completamento pairing ─────────────────────────────────────────────────────
   app.post<{ Body: { token: string; contactPublicKey: string; pushToken?: string } }>(
     '/pair',
+    { preHandler: [validateBody(pairSchema)] },
     async (req, reply) => {
       const inv = db.prepare('SELECT * FROM invites WHERE token = ? AND used = 0').get(req.body.token) as
         | { owner_id: string } | undefined;
@@ -125,7 +132,7 @@ export async function pairingRoutes(app: FastifyInstance) {
   app.delete<{
     Params: { contactId: string };
     Body: { contactPub: string; ts: number; sig: string };
-  }>('/contacts/:contactId/reject', async (req, reply) => {
+  }>('/contacts/:contactId/reject', { preHandler: [validateBody(rejectSchema)] }, async (req, reply) => {
     const { contactId } = req.params;
     const { contactPub, ts, sig } = req.body ?? {} as any;
     if (!contactPub || !ts || !sig) {
@@ -157,7 +164,7 @@ export async function pairingRoutes(app: FastifyInstance) {
   app.delete<{
     Params: { contactId: string };
     Body: { ownerPub: string; ts: number; sig: string; force?: boolean };
-  }>('/contacts/:contactId', async (req, reply) => {
+  }>('/contacts/:contactId', { preHandler: [validateBody(removeContactSchema)] }, async (req, reply) => {
     const { contactId } = req.params;
     const { ownerPub, ts, sig, force } = req.body ?? {} as any;
     if (!ownerPub || !ts || !sig) {
@@ -209,7 +216,7 @@ export async function pairingRoutes(app: FastifyInstance) {
   app.put<{
     Params: { contactId: string };
     Body: { ownerPub: string; ts: number; sig: string; newPublicKey: string };
-  }>('/contacts/:contactId', async (req, reply) => {
+  }>('/contacts/:contactId', { preHandler: [validateBody(rotateContactKeySchema)] }, async (req, reply) => {
     const { contactId } = req.params;
     const { ownerPub, ts, sig, newPublicKey } = req.body ?? {} as any;
     if (!ownerPub || !ts || !sig || !newPublicKey) {

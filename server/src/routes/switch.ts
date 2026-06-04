@@ -3,6 +3,11 @@ import { nanoid } from 'nanoid';
 import { db, audit } from '../db.js';
 import { withJitter } from './checkin.js';
 import { requireAuth } from '../middleware/auth.js';
+import {
+  validateBody,
+  switchCreateSchema, switchArmSchema, addContentSchema,
+  removeContentSchema, disarmSchema,
+} from '../middleware/validate.js';
 
 const HOUR = 3600;
 const DAY  = 86400;
@@ -18,7 +23,7 @@ export async function switchRoutes(app: FastifyInstance) {
   // ownerId è derivato da req.actor.id — non serve nel body.
   app.post<{ Body: { intervalSec: number; graceSec: number; pub: string; ts: number; sig: string } }>(
     '/switch/create',
-    { preHandler: [requireAuth('owner')] },
+    { preHandler: [requireAuth('owner'), validateBody(switchCreateSchema)] },
     async (req, reply) => {
       const { intervalSec, graceSec } = req.body;
       const ownerId = req.actor!.id;
@@ -61,7 +66,7 @@ export async function switchRoutes(app: FastifyInstance) {
     };
   }>(
     '/switch/arm',
-    { preHandler: [requireAuth('owner-of-switch')] },
+    { preHandler: [requireAuth('owner-of-switch'), validateBody(switchArmSchema)] },
     async (req, reply) => {
       const { switchId, drivePointer, contentIv, label, shares, recoveryK } = req.body;
       const now = Date.now();
@@ -98,7 +103,7 @@ export async function switchRoutes(app: FastifyInstance) {
   // requireAuth('owner-of-switch'): body include switchId.
   app.post<{ Body: { switchId: string; drivePointer: string; contentIv: string; label?: string; pub: string; ts: number; sig: string } }>(
     '/switch/add-content',
-    { preHandler: [requireAuth('owner-of-switch')] },
+    { preHandler: [requireAuth('owner-of-switch'), validateBody(addContentSchema)] },
     async (req, reply) => {
       const { switchId, drivePointer, contentIv, label } = req.body;
       const sw = db.prepare('SELECT state, interval_sec FROM switches WHERE id = ?').get(switchId) as
@@ -126,7 +131,7 @@ export async function switchRoutes(app: FastifyInstance) {
   // requireAuth('owner-of-switch'): body include switchId.
   app.post<{ Body: { switchId: string; contentId: string; pub: string; ts: number; sig: string } }>(
     '/switch/remove-content',
-    { preHandler: [requireAuth('owner-of-switch')] },
+    { preHandler: [requireAuth('owner-of-switch'), validateBody(removeContentSchema)] },
     async (req, reply) => {
       const { switchId, contentId } = req.body;
       const sw = db.prepare('SELECT state, interval_sec FROM switches WHERE id = ?').get(switchId) as
@@ -167,7 +172,7 @@ export async function switchRoutes(app: FastifyInstance) {
   // requireAuth('owner-of-switch'): solo l'owner può disarmare.
   app.post<{ Body: { switchId: string; pub: string; ts: number; sig: string } }>(
     '/switch/disarm',
-    { preHandler: [requireAuth('owner-of-switch')] },
+    { preHandler: [requireAuth('owner-of-switch'), validateBody(disarmSchema)] },
     async (req) => {
       db.prepare("UPDATE switches SET state='DISARMED', next_check_at=NULL WHERE id=?")
         .run(req.body.switchId);

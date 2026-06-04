@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { validateBody, authChallengeSchema, authVerifySchema } from '../middleware/validate.js';
 import { nanoid } from 'nanoid';
 import { db } from '../db.js';
 import { p256 } from '@noble/curves/p256';
@@ -23,7 +24,10 @@ export function verifySession(token?: string): string | null {
 
 export async function authRoutes(app: FastifyInstance) {
   // 1) il client chiede una sfida per la propria chiave pubblica
-  app.post<{ Body: { publicKey: string } }>('/auth/challenge', async (req) => {
+  app.post<{ Body: { publicKey: string } }>(
+    '/auth/challenge',
+    { preHandler: [validateBody(authChallengeSchema)] },
+    async (req) => {
     const nonce = 'sentinella:' + nanoid(24);
     challenges.set(req.body.publicKey, { nonce, exp: Date.now() + 2 * 60_000 });
     return { nonce }; // restituito sempre, per non rivelare se l'utente esiste
@@ -32,6 +36,7 @@ export async function authRoutes(app: FastifyInstance) {
   // 2) il client invia la firma del nonce; il server verifica e apre la sessione
   app.post<{ Body: { publicKey: string; nonce: string; sig: string } }>(
     '/auth/verify',
+    { preHandler: [validateBody(authVerifySchema)] },
     async (req) => {
       const { publicKey, nonce, sig } = req.body;
       const ch = challenges.get(publicKey);

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { db, audit } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { validateBody, checkinSchema } from '../middleware/validate.js';
 
 // +/- 15% di jitter sull'intervallo: rende meno leggibile il ritmo dei check-in.
 export function withJitter(sec: number) { return Math.round(sec * (0.85 + Math.random() * 0.30)); }
@@ -10,7 +11,7 @@ export function withJitter(sec: number) { return Math.round(sec * (0.85 + Math.r
 export async function checkinRoutes(app: FastifyInstance) {
   app.post<{ Body: { switchId: string; pub: string; ts: number; sig: string } }>(
     '/checkin/respond',
-    { preHandler: [requireAuth('owner-of-switch')] },
+    { preHandler: [requireAuth('owner-of-switch'), validateBody(checkinSchema)] },
     async (req, reply) => {
       const sw = db.prepare('SELECT interval_sec, state FROM switches WHERE id = ?')
         .get(req.body.switchId) as { interval_sec: number; state: string } | undefined;

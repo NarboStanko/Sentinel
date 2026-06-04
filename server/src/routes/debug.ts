@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { p256 } from '@noble/curves/p256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { db } from '../db.js';
+import { validateBody, debugSeedContactsSchema } from '../middleware/validate.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ROTTE DI DEBUG — completamente disabilitate in produzione (NODE_ENV check).
@@ -58,6 +59,7 @@ export async function debugRoutes(app: FastifyInstance) {
   // Il push token 'DEVTEST_NO_PUSH' li identifica come contatti fittizi nel DB.
   app.post<{ Body: { ownerId: string } }>(
     '/debug/seed-contacts',
+    { preHandler: [validateBody(debugSeedContactsSchema)] },
     async (req, reply) => {
       const { ownerId } = req.body;
       const owner = db.prepare('SELECT id FROM users WHERE id = ?').get(ownerId) as { id: string } | undefined;

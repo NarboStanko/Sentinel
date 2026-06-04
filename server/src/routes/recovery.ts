@@ -6,6 +6,11 @@ import { sha256 } from '@noble/hashes/sha256';
 import { hexToBytes } from '@noble/hashes/utils';
 import { sendPush, recoveryPush } from '../services/pushSender.js';
 import { requireAuth } from '../middleware/auth.js';
+import {
+  validateBody,
+  recoveryInitiateSchema, recoveryApproveSchema,
+  recoveryFinalizeSchema, recoveryCancelSchema,
+} from '../middleware/validate.js';
 
 // RECOVERY SOCIALE — FAIL-SAFE
 // NON disarma e NON rilascia: ruota soltanto la chiave pubblica del proprietario
@@ -17,6 +22,7 @@ export async function recoveryRoutes(app: FastifyInstance) {
   // Avviato dal proprietario da una NUOVA identita' (nuova seed su device nuovo)
   app.post<{ Body: { ownerId: string; newPublicKey: string; delaySec?: number } }>(
     '/recovery/initiate',
+    { preHandler: [validateBody(recoveryInitiateSchema)] },
     async (req) => {
       const { ownerId, newPublicKey } = req.body;
       // Default 7 giorni (604800s). Non scendere sotto 0.
@@ -57,7 +63,7 @@ export async function recoveryRoutes(app: FastifyInstance) {
   // Nessuna firma inline separata necessaria: il middleware copre sia identità che commit.
   app.post<{ Body: { recoveryId: string; pub: string; ts: number; sig: string } }>(
     '/recovery/approve',
-    { preHandler: [requireAuth('contact')] },
+    { preHandler: [requireAuth('contact'), validateBody(recoveryApproveSchema)] },
     async (req) => {
       const { recoveryId } = req.body;
       const contactPublicKey = req.actor!.pub;
@@ -78,7 +84,10 @@ export async function recoveryRoutes(app: FastifyInstance) {
 
   // Finalizza la rotazione. Guardie: ritardo trascorso + quorum + nessuno switch
   // in rilascio in corso.
-  app.post<{ Body: { recoveryId: string } }>('/recovery/finalize', async (req) => {
+  app.post<{ Body: { recoveryId: string } }>(
+    '/recovery/finalize',
+    { preHandler: [validateBody(recoveryFinalizeSchema)] },
+    async (req) => {
     const rec = db.prepare('SELECT * FROM recoveries WHERE id = ?').get(req.body.recoveryId) as any;
     if (!rec || rec.finalized || rec.cancelled) return { ok: false, reason: 'non finalizzabile' };
     if (Date.now() < rec.unlock_at) return { ok: false, reason: 'ritardo non ancora trascorso' };
@@ -98,7 +107,10 @@ export async function recoveryRoutes(app: FastifyInstance) {
 
   // Annullamento: chi possiede ancora la chiave ATTUALE puo' fermare un recovery
   // sospetto, firmando il recoveryId con la chiave attuale del proprietario.
-  app.post<{ Body: { recoveryId: string; sig: string } }>('/recovery/cancel', async (req) => {
+  app.post<{ Body: { recoveryId: string; sig: string } }>(
+    '/recovery/cancel',
+    { preHandler: [validateBody(recoveryCancelSchema)] },
+    async (req) => {
     const rec = db.prepare('SELECT owner_id, finalized FROM recoveries WHERE id = ?').get(req.body.recoveryId) as any;
     if (!rec || rec.finalized) return { ok: false, reason: 'non annullabile' };
     const owner = db.prepare('SELECT public_key FROM users WHERE id = ?').get(rec.owner_id) as any;

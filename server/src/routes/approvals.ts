@@ -8,6 +8,7 @@ import {
 } from '../services/rateLimiter.js';
 import { getLimits } from '../config/limits.js';
 import { requireAuth } from '../middleware/auth.js';
+import { validateBody, approvalSubmitSchema, releaseConfirmSchema } from '../middleware/validate.js';
 
 // SOGLIA + OCCULTAMENTO (k nascosto al server)
 // Il server NON conosce k. Custodisce blob opachi (reali + esche), raccoglie le
@@ -55,7 +56,7 @@ export async function approvalRoutes(app: FastifyInstance) {
   // Rate-limit keyed per contact_id (non per IP) per evitare che diversi contatti si blocchino.
   app.post<{ Body: { switchId: string; share: { x: number; y: string }; pub: string; ts: number; sig: string } }>(
     '/approval/submit',
-    { preHandler: [requireAuth('contact-of-switch')] },
+    { preHandler: [requireAuth('contact-of-switch'), validateBody(approvalSubmitSchema)] },
     async (req, reply) => {
       const { switchId, share } = req.body;
       const actorId = req.actor!.id;   // contact_id verificato dal middleware
@@ -110,7 +111,7 @@ export async function approvalRoutes(app: FastifyInstance) {
   // Un client che e' riuscito a ricombinare+decifrare conferma il rilascio.
   app.post<{ Body: { switchId: string; pub: string; ts: number; sig: string } }>(
     '/release/confirm',
-    { preHandler: [requireAuth('contact-of-switch')] },
+    { preHandler: [requireAuth('contact-of-switch'), validateBody(releaseConfirmSchema)] },
     async (req) => {
       db.prepare("UPDATE switches SET state='RELEASED' WHERE id=? AND state='APPROVAL_PENDING'")
         .run(req.body.switchId);

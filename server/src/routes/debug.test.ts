@@ -28,10 +28,13 @@ async function buildApp() {
 
 const app = await buildApp();
 
-// ── 1) La rotta esiste: {} → 404 custom (non Fastify "Route not found") ────────
-console.log('1) /debug/seed-contacts esiste — {} → 404 custom, non "Route not found"');
+// ── 1) La rotta esiste: ownerId inesistente → 404 custom (non Fastify "Route not found") ─
+console.log('1) /debug/seed-contacts esiste — ownerId inesistente → 404 custom, non "Route not found"');
 {
-  const res = await app.inject({ method: 'POST', url: '/debug/seed-contacts', payload: {} });
+  const res = await app.inject({
+    method: 'POST', url: '/debug/seed-contacts',
+    payload: { ownerId: 'usr_nonexistent0' },
+  });
   const body = JSON.parse(res.payload) as Record<string, unknown>;
   ok(res.statusCode === 404, `status 404 (ricevuto: ${res.statusCode})`);
   // Fastify restituisce { statusCode:404, error:"Not Found", message:"..." }
@@ -46,7 +49,7 @@ console.log('2) ownerId valido → 200 + 2 contatti P-256');
 {
   const ownerRes = await app.inject({
     method: 'POST', url: '/owner/register',
-    payload: { publicKey: '04testdebug0001', displayName: 'DebugOwner' },
+    payload: { publicKey: '02' + '1'.repeat(64), displayName: 'DebugOwner' },
   });
   const { ownerId } = JSON.parse(ownerRes.payload) as { ownerId: string };
 
@@ -94,7 +97,7 @@ console.log('4) /debug/expire/:switchId — switch ACTIVE → scadenza immediata
 {
   const ownerRes = await app.inject({
     method: 'POST', url: '/owner/register',
-    payload: { publicKey: '04testdebug0002' },
+    payload: { publicKey: '02' + '2'.repeat(64) },
   });
   const { ownerId } = JSON.parse(ownerRes.payload) as { ownerId: string };
 
@@ -118,7 +121,7 @@ console.log('5) /debug/expire/:switchId — switch DISARMED → 400');
 {
   const ownerRes = await app.inject({
     method: 'POST', url: '/owner/register',
-    payload: { publicKey: '04testdebug0003' },
+    payload: { publicKey: '02' + '3'.repeat(64) },
   });
   const { ownerId } = JSON.parse(ownerRes.payload) as { ownerId: string };
   db.prepare(
