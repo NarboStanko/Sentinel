@@ -145,3 +145,22 @@ export async function saveAuthToken(token: string): Promise<void> {
 export async function loadAuthToken(): Promise<string | null> {
   return SecureStore.getItemAsync(AUTH_TOKEN_KEY);
 }
+
+// PIN di coercizione (duress PIN) — separato dal PIN di backup seed.
+// Modalità: 'facade' (mostra dati fittizi) | 'trigger' (avvia rilascio silenzioso).
+const DURESS_PIN_KEY = 'sentinella.duress_pin';
+export type DuressMode = 'facade' | 'trigger';
+export interface DuressPinData { hashHex: string; saltHex: string; mode: DuressMode; }
+
+export async function saveDuressPin(hashHex: string, saltHex: string, mode: DuressMode): Promise<void> {
+  await SecureStore.setItemAsync(DURESS_PIN_KEY, JSON.stringify({ hashHex, saltHex, mode }), {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
+export async function loadDuressPin(): Promise<DuressPinData | null> {
+  const raw = await SecureStore.getItemAsync(DURESS_PIN_KEY);
+  return raw ? (JSON.parse(raw) as DuressPinData) : null;
+}
+export async function deleteDuressPin(): Promise<void> {
+  await SecureStore.deleteItemAsync(DURESS_PIN_KEY);
+}

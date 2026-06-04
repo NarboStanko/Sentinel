@@ -13,6 +13,7 @@ import { devBlobRoutes } from './routes/devblob.js';
 import { debugRoutes } from './routes/debug.js';
 import { auditRoutes } from './routes/audit.js';
 import { auditChainRoutes } from './routes/audit_chain.js';
+import { duressRoutes } from './routes/duress.js';
 import { startScheduler } from './services/scheduler.js';
 import { registerIpRateLimitHook, cleanupExpiredEntries } from './services/rateLimiter.js';
 
@@ -73,6 +74,7 @@ await app.register(pushRoutes);
 await app.register(pendingRoutes);
 await app.register(auditRoutes);
 await app.register(auditChainRoutes);
+await app.register(duressRoutes);
 await app.register(devBlobRoutes); // dev only
 await app.register(debugRoutes);  // dev only (no-op in production)
 

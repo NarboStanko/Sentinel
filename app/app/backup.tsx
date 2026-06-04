@@ -3,20 +3,14 @@ import { View, Text, TextInput } from 'react-native';
 import { router } from 'expo-router';
 import * as ScreenCapture from 'expo-screen-capture';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { sha256 } from '@noble/hashes/sha256';
-import { bytesToHex } from '@noble/hashes/utils';
 import { randomBytes } from '../lib/crypto';
+import { hashPin } from '../lib/pinHash';
 import { Screen, Card, Button, T } from '../components/ui';
 import { colors, space, radius } from '../theme';
 import { loadSeed, loadBackupPin, saveBackupPin, loadAuthToken } from '../lib/keystore';
 import { api } from '../lib/api';
 
 type Step = 'pin-setup' | 'pin-enter' | 'biometric' | 'countdown' | 'revealed' | 'hidden';
-
-function hashPin(salt: string, pin: string): string {
-  const input = new TextEncoder().encode(salt + pin);
-  return bytesToHex(sha256(input));
-}
 
 export default function Backup() {
   // Blocca screenshot per tutta la durata della schermata

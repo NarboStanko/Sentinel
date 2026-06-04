@@ -145,7 +145,12 @@ export async function fetchEvents(
 
 // Registra ANCHOR_SAVED o VERIFICATION_FAILED nella catena server-side
 export async function postAnchorEvent(
-  eventType: 'ANCHOR_SAVED' | 'VERIFICATION_FAILED' | 'RECOVERY_CONFIRMED_AFTER_VERIFICATION_FAIL',
+  eventType:
+    | 'ANCHOR_SAVED'
+    | 'VERIFICATION_FAILED'
+    | 'RECOVERY_CONFIRMED_AFTER_VERIFICATION_FAIL'
+    | 'DURESS_FACADE_TRIGGERED'
+    | 'DURESS_SETUP_CHANGED',
   metadata: Record<string, unknown>,
   id: Identity,
 ): Promise<void> {

@@ -122,15 +122,28 @@ export async function auditChainRoutes(app: FastifyInstance) {
   // POST /audit/anchor-event — registra ANCHOR_SAVED o VERIFICATION_FAILED nella catena.
   // Auth: requireAuth('owner')
   const anchorEventSchema = z.object({
-    eventType: z.enum(['ANCHOR_SAVED', 'VERIFICATION_FAILED', 'RECOVERY_CONFIRMED_AFTER_VERIFICATION_FAIL']),
+    eventType: z.enum([
+      'ANCHOR_SAVED',
+      'VERIFICATION_FAILED',
+      'RECOVERY_CONFIRMED_AFTER_VERIFICATION_FAIL',
+      'DURESS_FACADE_TRIGGERED',
+      'DURESS_SETUP_CHANGED',
+    ]),
     metadata:  z.record(z.unknown()).optional(),
     pub: z.string().length(66),
     ts:  z.number().int().positive(),
     sig: z.string().length(128),
   }).strict();
 
+  type AnchorEventType =
+    | 'ANCHOR_SAVED'
+    | 'VERIFICATION_FAILED'
+    | 'RECOVERY_CONFIRMED_AFTER_VERIFICATION_FAIL'
+    | 'DURESS_FACADE_TRIGGERED'
+    | 'DURESS_SETUP_CHANGED';
+
   app.post<{
-    Body: { eventType: 'ANCHOR_SAVED' | 'VERIFICATION_FAILED' | 'RECOVERY_CONFIRMED_AFTER_VERIFICATION_FAIL'; metadata?: Record<string, unknown>; pub: string; ts: number; sig: string };
+    Body: { eventType: AnchorEventType; metadata?: Record<string, unknown>; pub: string; ts: number; sig: string };
   }>(
     '/audit/anchor-event',
     { preHandler: [requireAuth('owner'), validateBody(anchorEventSchema)] },

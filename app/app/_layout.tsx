@@ -100,6 +100,7 @@ export default function Layout() {
       <Stack.Screen name="audit-tools"      options={{ title: 'Strumenti di verifica' }} />
       <Stack.Screen name="verify-failed"    options={{ title: 'Verifica integrità' }} />
       <Stack.Screen name="recovery-confirm" options={{ title: 'Conferma recovery' }} />
+      <Stack.Screen name="duress-setup"     options={{ title: 'PIN di emergenza' }} />
     </Stack>
   );
 }

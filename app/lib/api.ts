@@ -136,8 +136,15 @@ export const api = {
     req<{ events: any[] }>(
       `/audit/events?ownerId=${encodeURIComponent(ownerId)}&fromIndex=${fromIndex}&toIndex=${toIndex}&pub=${encodeURIComponent(pub)}&ts=${ts}&sig=${encodeURIComponent(sig)}`
     ),
-  auditAnchorEvent: (eventType: 'ANCHOR_SAVED' | 'VERIFICATION_FAILED', metadata: Record<string, unknown>) =>
+  auditAnchorEvent: (
+    eventType: 'ANCHOR_SAVED' | 'VERIFICATION_FAILED' | 'RECOVERY_CONFIRMED_AFTER_VERIFICATION_FAIL' | 'DURESS_FACADE_TRIGGERED' | 'DURESS_SETUP_CHANGED',
+    metadata: Record<string, unknown>
+  ) =>
     signedReq<{ ok: boolean }>('/audit/anchor-event', 'POST', { eventType, metadata }),
+
+  // Duress trigger: porta tutti gli switch ACTIVE/GRACE in APPROVAL_PENDING
+  duressTrigger: () =>
+    signedReq<{ ok: boolean; switchesTriggered: number }>('/duress/trigger', 'POST', {}),
 
   // ── SOLO SVILUPPO (NODE_ENV !== 'production' lato server) ─────────────────
   // Crea 2 contatti fittizi sul server e restituisce le loro chiavi pubbliche.
