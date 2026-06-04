@@ -5,6 +5,7 @@ import { p256 } from '@noble/curves/p256';
 import { sha256 } from '@noble/hashes/sha256';
 import { hexToBytes } from '@noble/hashes/utils';
 import { sendPush, recoveryPush } from '../services/pushSender.js';
+import { requireAuth } from '../middleware/auth.js';
 
 // RECOVERY SOCIALE — FAIL-SAFE
 // NON disarma e NON rilascia: ruota soltanto la chiave pubblica del proprietario
@@ -51,20 +52,22 @@ export async function recoveryRoutes(app: FastifyInstance) {
     }
   );
 
-  // Un contatto approva firmando il recoveryId con la PROPRIA chiave privata.
-  app.post<{ Body: { recoveryId: string; contactPublicKey: string; sig: string } }>(
+  // Un contatto approva il recovery. L'identità è verificata via requireAuth('contact').
+  // La firma canonica già prova il commitment al recoveryId incluso nel body.
+  // Nessuna firma inline separata necessaria: il middleware copre sia identità che commit.
+  app.post<{ Body: { recoveryId: string; pub: string; ts: number; sig: string } }>(
     '/recovery/approve',
+    { preHandler: [requireAuth('contact')] },
     async (req) => {
-      const { recoveryId, contactPublicKey, sig } = req.body;
+      const { recoveryId } = req.body;
+      const contactPublicKey = req.actor!.pub;
       const rec = db.prepare('SELECT owner_id, finalized, cancelled FROM recoveries WHERE id = ?')
         .get(recoveryId) as any;
       if (!rec || rec.finalized || rec.cancelled) return { ok: false, reason: 'recovery non attivo' };
-      // il firmatario deve essere un contatto fidato di questo proprietario
+      // Verifica che il contatto autenticato appartenga all'owner di questo recovery
       const isContact = db.prepare('SELECT 1 FROM contacts WHERE owner_id = ? AND public_key = ?')
         .get(rec.owner_id, contactPublicKey);
       if (!isContact) return { ok: false, reason: 'non sei un contatto fidato' };
-      const ok = p256.verify(hexToBytes(sig), sha256(new TextEncoder().encode(recoveryId)), hexToBytes(contactPublicKey));
-      if (!ok) return { ok: false, reason: 'firma non valida' };
       db.prepare('INSERT OR IGNORE INTO recovery_approvals (recovery_id, contact_public_key, created_at) VALUES (?,?,?)')
         .run(recoveryId, contactPublicKey, Date.now());
       audit(null, 'ROTATION_APPROVED');

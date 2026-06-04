@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { db, audit } from '../db.js';
 import { withJitter } from './checkin.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const HOUR = 3600;
 const DAY  = 86400;
@@ -13,10 +14,14 @@ function getLimits(isDev: boolean) {
 }
 
 export async function switchRoutes(app: FastifyInstance) {
-  app.post<{ Body: { ownerId: string; intervalSec: number; graceSec: number } }>(
+  // requireAuth('owner'): solo un owner registrato può creare switch.
+  // ownerId è derivato da req.actor.id — non serve nel body.
+  app.post<{ Body: { intervalSec: number; graceSec: number; pub: string; ts: number; sig: string } }>(
     '/switch/create',
+    { preHandler: [requireAuth('owner')] },
     async (req, reply) => {
-      const { ownerId, intervalSec, graceSec } = req.body;
+      const { intervalSec, graceSec } = req.body;
+      const ownerId = req.actor!.id;
       const limits = getLimits(process.env['NODE_ENV'] !== 'production');
 
       if (intervalSec < limits.intervalMin || intervalSec > limits.intervalMax) {
@@ -43,8 +48,7 @@ export async function switchRoutes(app: FastifyInstance) {
   );
 
   // Arma: inserisce il primo contenuto cifrato in switch_contents e attiva lo switch.
-  // Le quote Shamir sono opache (reali + esche mescolate dal client).
-  // Restituisce contentId per permettere al client di tenere la mappa contentId→pointer.
+  // requireAuth('owner-of-switch'): il body include switchId per il lookup.
   app.post<{
     Body: {
       switchId: string;
@@ -53,43 +57,48 @@ export async function switchRoutes(app: FastifyInstance) {
       label?: string;
       shares: { x: number; blob: string }[];
       recoveryK?: number;
+      pub: string; ts: number; sig: string;
     };
-  }>('/switch/arm', async (req, reply) => {
-    const { switchId, drivePointer, contentIv, label, shares, recoveryK } = req.body;
-    const now = Date.now();
-    const sw = db.prepare('SELECT interval_sec FROM switches WHERE id = ?').get(switchId) as
-      | { interval_sec: number } | undefined;
-    if (!sw) return reply.code(404).send({ error: 'switch_non_trovato', message: 'Switch non trovato.' });
+  }>(
+    '/switch/arm',
+    { preHandler: [requireAuth('owner-of-switch')] },
+    async (req, reply) => {
+      const { switchId, drivePointer, contentIv, label, shares, recoveryK } = req.body;
+      const now = Date.now();
+      const sw = db.prepare('SELECT interval_sec FROM switches WHERE id = ?').get(switchId) as
+        | { interval_sec: number } | undefined;
+      if (!sw) return reply.code(404).send({ error: 'switch_non_trovato', message: 'Switch non trovato.' });
 
-    db.prepare('DELETE FROM shares WHERE switch_id = ?').run(switchId);
-    db.prepare('DELETE FROM switch_contents WHERE switch_id = ?').run(switchId);
+      db.prepare('DELETE FROM shares WHERE switch_id = ?').run(switchId);
+      db.prepare('DELETE FROM switch_contents WHERE switch_id = ?').run(switchId);
 
-    const ins = db.prepare('INSERT INTO shares (id, switch_id, x, blob) VALUES (?,?,?,?)');
-    for (const sh of shares) ins.run('sh_' + nanoid(8), switchId, sh.x, sh.blob);
+      const ins = db.prepare('INSERT INTO shares (id, switch_id, x, blob) VALUES (?,?,?,?)');
+      for (const sh of shares) ins.run('sh_' + nanoid(8), switchId, sh.x, sh.blob);
 
-    const contentId = 'sc_' + nanoid(10);
-    db.prepare(
-      'INSERT INTO switch_contents (id, switch_id, drive_pointer, content_iv, label, created_at) VALUES (?,?,?,?,?,?)'
-    ).run(contentId, switchId, drivePointer, contentIv, label ?? '', now);
+      const contentId = 'sc_' + nanoid(10);
+      db.prepare(
+        'INSERT INTO switch_contents (id, switch_id, drive_pointer, content_iv, label, created_at) VALUES (?,?,?,?,?,?)'
+      ).run(contentId, switchId, drivePointer, contentIv, label ?? '', now);
 
-    db.prepare(
-      `UPDATE switches SET state='ACTIVE', last_checkin=?, next_check_at=?, armed_at=? WHERE id=?`
-    ).run(now, now + withJitter(sw.interval_sec) * 1000, now, switchId);
-    audit(switchId, 'ARMED');
+      db.prepare(
+        `UPDATE switches SET state='ACTIVE', last_checkin=?, next_check_at=?, armed_at=? WHERE id=?`
+      ).run(now, now + withJitter(sw.interval_sec) * 1000, now, switchId);
+      audit(switchId, 'ARMED');
 
-    if (typeof recoveryK === 'number' && recoveryK >= 1) {
-      const owner = db.prepare('SELECT owner_id FROM switches WHERE id = ?').get(switchId) as { owner_id: string } | undefined;
-      if (owner) db.prepare('UPDATE users SET recovery_k = ? WHERE id = ?').run(recoveryK, owner.owner_id);
+      if (typeof recoveryK === 'number' && recoveryK >= 1) {
+        const owner = db.prepare('SELECT owner_id FROM switches WHERE id = ?').get(switchId) as { owner_id: string } | undefined;
+        if (owner) db.prepare('UPDATE users SET recovery_k = ? WHERE id = ?').run(recoveryK, owner.owner_id);
+      }
+
+      return { ok: true, contentId };
     }
+  );
 
-    return { ok: true, contentId };
-  });
-
-  // Aggiunge un nuovo contenuto cifrato a uno switch ACTIVE (append, non sovrascrittura).
-  // Stessa DEK → le quote Shamir esistenti rimangono valide, nessuna ridistribuzione.
-  // Conta come check-in: resetta next_check_at.
-  app.post<{ Body: { switchId: string; drivePointer: string; contentIv: string; label?: string } }>(
+  // Aggiunge contenuto cifrato a uno switch ACTIVE (append).
+  // requireAuth('owner-of-switch'): body include switchId.
+  app.post<{ Body: { switchId: string; drivePointer: string; contentIv: string; label?: string; pub: string; ts: number; sig: string } }>(
     '/switch/add-content',
+    { preHandler: [requireAuth('owner-of-switch')] },
     async (req, reply) => {
       const { switchId, drivePointer, contentIv, label } = req.body;
       const sw = db.prepare('SELECT state, interval_sec FROM switches WHERE id = ?').get(switchId) as
@@ -114,11 +123,10 @@ export async function switchRoutes(app: FastifyInstance) {
   );
 
   // Rimuove un singolo contenuto da uno switch ACTIVE.
-  // Blocca se è l'ultimo contenuto (un pacchetto armato deve avere almeno un contenuto).
-  // Il client deve cancellare il blob dallo storage PRIMA di chiamare questo endpoint.
-  // Conta come check-in: resetta next_check_at.
-  app.post<{ Body: { switchId: string; contentId: string } }>(
+  // requireAuth('owner-of-switch'): body include switchId.
+  app.post<{ Body: { switchId: string; contentId: string; pub: string; ts: number; sig: string } }>(
     '/switch/remove-content',
+    { preHandler: [requireAuth('owner-of-switch')] },
     async (req, reply) => {
       const { switchId, contentId } = req.body;
       const sw = db.prepare('SELECT state, interval_sec FROM switches WHERE id = ?').get(switchId) as
@@ -146,7 +154,7 @@ export async function switchRoutes(app: FastifyInstance) {
     }
   );
 
-  // Lista dei contenuti di uno switch (label + id, senza puntatori — mai esposti prima di RELEASED).
+  // Lista dei contenuti (label + id, senza puntatori). GET anonimo: il switchId è pubblico.
   app.get<{ Querystring: { switchId: string } }>('/switch/contents', async (req, reply) => {
     const sw = db.prepare('SELECT state FROM switches WHERE id = ?').get(req.query.switchId) as any;
     if (!sw) return reply.code(404).send({ error: 'switch_non_trovato', message: 'Switch non trovato.' });
@@ -156,15 +164,21 @@ export async function switchRoutes(app: FastifyInstance) {
     return { contents: rows };
   });
 
-  app.post<{ Body: { switchId: string } }>('/switch/disarm', async (req) => {
-    db.prepare("UPDATE switches SET state='DISARMED', next_check_at=NULL WHERE id=?")
-      .run(req.body.switchId);
-    db.prepare('DELETE FROM shares WHERE switch_id = ?').run(req.body.switchId);
-    db.prepare('DELETE FROM switch_contents WHERE switch_id = ?').run(req.body.switchId);
-    audit(req.body.switchId, 'DISARMED');
-    return { ok: true };
-  });
+  // requireAuth('owner-of-switch'): solo l'owner può disarmare.
+  app.post<{ Body: { switchId: string; pub: string; ts: number; sig: string } }>(
+    '/switch/disarm',
+    { preHandler: [requireAuth('owner-of-switch')] },
+    async (req) => {
+      db.prepare("UPDATE switches SET state='DISARMED', next_check_at=NULL WHERE id=?")
+        .run(req.body.switchId);
+      db.prepare('DELETE FROM shares WHERE switch_id = ?').run(req.body.switchId);
+      db.prepare('DELETE FROM switch_contents WHERE switch_id = ?').run(req.body.switchId);
+      audit(req.body.switchId, 'DISARMED');
+      return { ok: true };
+    }
+  );
 
+  // GET anonimo: il switchId è un ID non-segreto.
   app.get<{ Querystring: { switchId: string } }>('/switch', async (req) => {
     const sw = db.prepare('SELECT * FROM switches WHERE id = ?').get(req.query.switchId);
     return { switch: sw };

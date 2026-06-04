@@ -151,12 +151,7 @@ function ApproveSection() {
   async function handleApprove(recoveryId: string) {
     setBusy(true);
     try {
-      const identity = await loadIdentity();
-      if (!identity) return;
-      const pubHex = bytesToHex(identity.pub);
-      // signChallenge firma sha256(messaggio) — corrisponde a quanto il server verifica
-      const sig = signChallenge(identity.priv, recoveryId);
-      const res = await api.recoveryApprove(recoveryId, pubHex, sig);
+      const res = await api.recoveryApprove(recoveryId);
       setResults((r) => ({
         ...r,
         [recoveryId]: res.ok

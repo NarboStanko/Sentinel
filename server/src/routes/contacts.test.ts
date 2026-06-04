@@ -12,6 +12,7 @@ const { db } = await import('../db.js');
 const { p256 } = await import('@noble/curves/p256');
 const { sha256 } = await import('@noble/hashes/sha256');
 const { bytesToHex } = await import('@noble/hashes/utils');
+const { signBody } = await import('../testUtils/authHelpers.js');
 
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string) => {
@@ -47,8 +48,16 @@ async function mkOwner(name: string) {
 
 // Helper: crea un invito per un owner e accoppia un contatto con pushToken dato.
 // Restituisce { contactId, token }.
-async function mkContact(ownerId: string, pushToken: string, contactPublicKey?: string) {
-  const invRes = await app.inject({ method: 'POST', url: '/invite', payload: { ownerId } });
+async function mkContact(
+  owner: { ownerId: string; priv: Uint8Array; pub: string },
+  pushToken: string,
+  contactPublicKey?: string,
+) {
+  const invRes = await app.inject({
+    method: 'POST',
+    url: '/invite',
+    payload: signBody(owner.priv, owner.pub, 'POST', '/invite', {}),
+  });
   const { token } = JSON.parse(invRes.payload) as { token: string };
   const pubKey = contactPublicKey ?? bytesToHex(p256.getPublicKey(p256.utils.randomPrivateKey(), true));
   const pairRes = await app.inject({
@@ -62,13 +71,17 @@ async function mkContact(ownerId: string, pushToken: string, contactPublicKey?: 
 // ── 1) POST /pair con push_token duplicato → 409, invite NON consumato ────────
 console.log('1) /pair — push_token duplicato → 409, invito non consumato');
 {
-  const { ownerId } = await mkOwner('Owner1');
+  const { ownerId, priv, pub } = await mkOwner('Owner1');
 
   // Primo pairing con pushToken='push_abc'
-  const { contactId: firstContactId } = await mkContact(ownerId, 'push_abc');
+  const { contactId: firstContactId } = await mkContact({ ownerId, priv, pub }, 'push_abc');
 
   // Secondo invito dallo stesso owner, ma stesso pushToken
-  const inv2Res = await app.inject({ method: 'POST', url: '/invite', payload: { ownerId } });
+  const inv2Res = await app.inject({
+    method: 'POST',
+    url: '/invite',
+    payload: signBody(priv, pub, 'POST', '/invite', {}),
+  });
   const { token: token2 } = JSON.parse(inv2Res.payload) as { token: string };
   const newPub = bytesToHex(p256.getPublicKey(p256.utils.randomPrivateKey(), true));
   const res = await app.inject({
@@ -90,7 +103,7 @@ console.log('1) /pair — push_token duplicato → 409, invito non consumato');
 console.log('2) DELETE /contacts/:contactId — owner rimuove contatto → 200, riga eliminata');
 {
   const { ownerId, priv, pub } = await mkOwner('Owner2');
-  const { contactId } = await mkContact(ownerId, 'push_del_2');
+  const { contactId } = await mkContact({ ownerId, priv, pub }, 'push_del_2');
 
   const ts = Date.now();
   const sig = signMsg(priv, `sentinella:remove-contact:${contactId}:${ts}`);
@@ -114,12 +127,12 @@ console.log('3) DELETE /contacts/:contactId — switch ACTIVE, no force → 409'
 {
   process.env['NODE_ENV'] = 'test';
   const { ownerId, priv, pub } = await mkOwner('Owner3');
-  const { contactId } = await mkContact(ownerId, 'push_del_3');
+  const { contactId } = await mkContact({ ownerId, priv, pub }, 'push_del_3');
 
   // Crea uno switch e portalo ad ACTIVE
   const swRes = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId, intervalSec: 30, graceSec: 10 },
+    payload: signBody(priv, pub, 'POST', '/switch/create', { intervalSec: 30, graceSec: 10 }),
   });
   const { switchId } = JSON.parse(swRes.payload) as { switchId: string };
   const now = Date.now();
@@ -145,11 +158,11 @@ console.log('4) DELETE /contacts/:contactId — force:true con switch ACTIVE →
 {
   process.env['NODE_ENV'] = 'test';
   const { ownerId, priv, pub } = await mkOwner('Owner4');
-  const { contactId } = await mkContact(ownerId, 'push_del_4');
+  const { contactId } = await mkContact({ ownerId, priv, pub }, 'push_del_4');
 
   const swRes = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId, intervalSec: 30, graceSec: 10 },
+    payload: signBody(priv, pub, 'POST', '/switch/create', { intervalSec: 30, graceSec: 10 }),
   });
   const { switchId } = JSON.parse(swRes.payload) as { switchId: string };
   const now = Date.now();
@@ -175,8 +188,8 @@ console.log('4) DELETE /contacts/:contactId — force:true con switch ACTIVE →
 // ── 5) DELETE /contacts/:contactId — owner sbagliato → 401 o 404 ──────────────
 console.log('5) DELETE /contacts/:contactId — owner sbagliato (chiave diversa) → 401 o 404');
 {
-  const { ownerId } = await mkOwner('OwnerA');
-  const { contactId } = await mkContact(ownerId, 'push_del_5a');
+  const { ownerId, priv: privA, pub: pubA } = await mkOwner('OwnerA');
+  const { contactId } = await mkContact({ ownerId, priv: privA, pub: pubA }, 'push_del_5a');
 
   // Owner B con chiave diversa
   const { priv: privB, pub: pubB } = await mkOwner('OwnerB');
@@ -194,7 +207,7 @@ console.log('5) DELETE /contacts/:contactId — owner sbagliato (chiave diversa)
 console.log('6) PUT /contacts/:contactId — rotazione chiave, no switch → 200, chiave aggiornata nel DB');
 {
   const { ownerId, priv, pub } = await mkOwner('Owner6');
-  const { contactId } = await mkContact(ownerId, 'push_rot_6');
+  const { contactId } = await mkContact({ ownerId, priv, pub }, 'push_rot_6');
 
   const newPriv = p256.utils.randomPrivateKey();
   const newPub = bytesToHex(p256.getPublicKey(newPriv, true));
@@ -222,11 +235,11 @@ console.log('7) PUT /contacts/:contactId — switch ACTIVE → 409, chiave invar
   const { ownerId, priv, pub } = await mkOwner('Owner7');
   const contactPriv = p256.utils.randomPrivateKey();
   const contactPubOrig = bytesToHex(p256.getPublicKey(contactPriv, true));
-  const { contactId } = await mkContact(ownerId, 'push_rot_7', contactPubOrig);
+  const { contactId } = await mkContact({ ownerId, priv, pub }, 'push_rot_7', contactPubOrig);
 
   const swRes = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId, intervalSec: 30, graceSec: 10 },
+    payload: signBody(priv, pub, 'POST', '/switch/create', { intervalSec: 30, graceSec: 10 }),
   });
   const { switchId } = JSON.parse(swRes.payload) as { switchId: string };
   const now = Date.now();
@@ -251,10 +264,10 @@ console.log('7) PUT /contacts/:contactId — switch ACTIVE → 409, chiave invar
 // ── 8) DELETE /contacts/:contactId/reject — contatto rifiuta il pairing → 200 ──
 console.log('8) DELETE /contacts/:contactId/reject — contatto rifiuta il pairing → 200, riga eliminata');
 {
-  const { ownerId } = await mkOwner('Owner8');
+  const { ownerId, priv, pub } = await mkOwner('Owner8');
   const contactPriv = p256.utils.randomPrivateKey();
   const contactPub = bytesToHex(p256.getPublicKey(contactPriv, true));
-  const { contactId } = await mkContact(ownerId, 'push_rej_8', contactPub);
+  const { contactId } = await mkContact({ ownerId, priv, pub }, 'push_rej_8', contactPub);
 
   const ts = Date.now();
   const sig = signMsg(contactPriv, `sentinella:reject-pairing:${contactId}:${ts}`);
@@ -276,10 +289,10 @@ console.log('8) DELETE /contacts/:contactId/reject — contatto rifiuta il pairi
 // ── 9) DELETE /contacts/:contactId/reject — chiave sbagliata → 401 ─────────────
 console.log('9) DELETE /contacts/:contactId/reject — chiave sbagliata → 401');
 {
-  const { ownerId } = await mkOwner('Owner9');
+  const { ownerId, priv, pub } = await mkOwner('Owner9');
   const contactPrivX = p256.utils.randomPrivateKey();
   const contactPubX = bytesToHex(p256.getPublicKey(contactPrivX, true));
-  const { contactId } = await mkContact(ownerId, 'push_rej_9', contactPubX);
+  const { contactId } = await mkContact({ ownerId, priv, pub }, 'push_rej_9', contactPubX);
 
   // Firma con una chiave Y diversa
   const privY = p256.utils.randomPrivateKey();
@@ -296,8 +309,8 @@ console.log('9) DELETE /contacts/:contactId/reject — chiave sbagliata → 401'
 // ── 10) GET /contacts — restituisce push_token_preview e created_at ───────────
 console.log('10) GET /contacts — push_token_preview mascherato e created_at presente');
 {
-  const { ownerId } = await mkOwner('Owner10');
-  await mkContact(ownerId, 'ExPushToken12345XYZ');
+  const { ownerId, priv, pub } = await mkOwner('Owner10');
+  await mkContact({ ownerId, priv, pub }, 'ExPushToken12345XYZ');
 
   const res = await app.inject({ method: 'GET', url: `/contacts?ownerId=${ownerId}` });
   const body = JSON.parse(res.payload) as any;

@@ -1,4 +1,9 @@
 import Constants from 'expo-constants';
+import { signChallenge, bytesToHex } from './crypto';
+import { loadIdentity } from './keystore';
+import { canonicalize } from './canonicalize';
+
+export { canonicalize } from './canonicalize';
 
 const BASE =
   (Constants.expoConfig?.extra?.serverUrl as string) ?? 'http://localhost:4000';
@@ -36,28 +41,45 @@ async function req<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
   return res.json() as Promise<T>;
 }
 
+async function signedReq<T>(
+  path: string,
+  method: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const id = await loadIdentity();
+  if (!id) throw new ApiError(401, 'Identità non disponibile');
+  const pub = bytesToHex(id.pub);
+  const ts = Date.now();
+  const sig = signChallenge(id.priv, canonicalize(method, path, ts, pub, body));
+  return req<T>(path, method, { ...body, pub, ts, sig });
+}
+
 export const api = {
   registerOwner: (publicKey: string, displayName?: string) =>
     req<{ ownerId: string }>('/owner/register', 'POST', { publicKey, displayName }),
-  createInvite: (ownerId: string) =>
-    req<{ token: string; ownerPublicKey: string }>('/invite', 'POST', { ownerId }),
+  createInvite: () =>
+    signedReq<{ token: string; ownerPublicKey: string }>('/invite', 'POST', {}),
   pair: (token: string, contactPublicKey: string, pushToken?: string) =>
     req<{ contactId: string }>('/pair', 'POST', { token, contactPublicKey, pushToken }),
   contacts: (ownerId: string) =>
     req<{ contacts: any[] }>(`/contacts?ownerId=${ownerId}`),
-  createSwitch: (ownerId: string, intervalSec: number, graceSec: number) =>
-    req<{ switchId: string }>('/switch/create', 'POST', { ownerId, intervalSec, graceSec }),
-  arm: (payload: any) => req<{ ok: boolean; contentId: string }>('/switch/arm', 'POST', payload),
-  disarm: (switchId: string) => req<{ ok: boolean }>('/switch/disarm', 'POST', { switchId }),
+  createSwitch: (intervalSec: number, graceSec: number) =>
+    signedReq<{ switchId: string }>('/switch/create', 'POST', { intervalSec, graceSec }),
+  arm: (payload: Record<string, unknown>) =>
+    signedReq<{ ok: boolean; contentId: string }>('/switch/arm', 'POST', payload),
+  disarm: (switchId: string) =>
+    signedReq<{ ok: boolean }>('/switch/disarm', 'POST', { switchId }),
   getSwitch: (switchId: string) => req<{ switch: any }>(`/switch?switchId=${switchId}`),
-  checkin: (switchId: string) => req<{ ok: boolean; nextCheckAt: number }>('/checkin/respond', 'POST', { switchId }),
+  checkin: (switchId: string) =>
+    signedReq<{ ok: boolean; nextCheckAt: number }>('/checkin/respond', 'POST', { switchId }),
   approvalRequest: (switchId: string) =>
     req<any>(`/approval/request?switchId=${switchId}`),
   shares: (switchId: string) =>
     req<{ blobs: string[] }>(`/shares?switchId=${switchId}`),
   approvalSubmit: (switchId: string, share: { x: number; y: string }) =>
-    req<{ collected: { x: number; y: string }[] }>('/approval/submit', 'POST', { switchId, share }),
-  releaseConfirm: (switchId: string) => req<{ ok: boolean }>('/release/confirm', 'POST', { switchId }),
+    signedReq<{ collected: { x: number; y: string }[] }>('/approval/submit', 'POST', { switchId, share }),
+  releaseConfirm: (switchId: string) =>
+    signedReq<{ ok: boolean }>('/release/confirm', 'POST', { switchId }),
   // autenticazione passwordless
   authChallenge: (publicKey: string) =>
     req<{ nonce: string }>('/auth/challenge', 'POST', { publicKey }),
@@ -66,8 +88,8 @@ export const api = {
   // recovery sociale (fail-safe)
   recoveryInitiate: (ownerId: string, newPublicKey: string, delaySec?: number) =>
     req<{ ok: boolean; recoveryId?: string; unlockAt?: number; reason?: string }>('/recovery/initiate', 'POST', { ownerId, newPublicKey, delaySec }),
-  recoveryApprove: (recoveryId: string, contactPublicKey: string, sig: string) =>
-    req<{ ok: boolean; approvals?: number; reason?: string }>('/recovery/approve', 'POST', { recoveryId, contactPublicKey, sig }),
+  recoveryApprove: (recoveryId: string) =>
+    signedReq<{ ok: boolean; approvals?: number; reason?: string }>('/recovery/approve', 'POST', { recoveryId }),
   recoveryFinalize: (recoveryId: string) =>
     req<{ ok: boolean; reason?: string }>('/recovery/finalize', 'POST', { recoveryId }),
   recoveryCancel: (recoveryId: string, sig: string) =>
@@ -80,7 +102,7 @@ export const api = {
   auditSeedRestoreAck: (token: string, switchId: string) =>
     req<{ ok: boolean }>('/audit/seed-restore-ack', 'POST', { token, switchId }),
   registerPush: (role: 'owner' | 'contact', id: string, pushToken: string) =>
-    req<{ ok: boolean }>('/push/register', 'POST', { role, id, pushToken }),
+    signedReq<{ ok: boolean }>('/push/register', 'POST', { role, id, pushToken }),
 
   // Switch in APPROVAL_PENDING per il contatto autenticato a firma.
   // pub: chiave pubblica hex del contatto; ts: timestamp ms; sig: firma compatta P-256.
@@ -89,13 +111,11 @@ export const api = {
       `/pending?pub=${encodeURIComponent(pub)}&ts=${ts}&sig=${encodeURIComponent(sig)}`
     ),
 
-  // Aggiunge contenuto a uno switch ACTIVE senza ridistribuire le quote.
-  // Conta come check-in: azzera next_check_at.
   addContent: (switchId: string, drivePointer: string, contentIv: string, label?: string) =>
-    req<{ ok: boolean; contentId: string; nextCheckAt: number }>('/switch/add-content', 'POST', { switchId, drivePointer, contentIv, label }),
+    signedReq<{ ok: boolean; contentId: string; nextCheckAt: number }>('/switch/add-content', 'POST', { switchId, drivePointer, contentIv, ...(label !== undefined ? { label } : {}) }),
 
   removeContent: (switchId: string, contentId: string) =>
-    req<{ ok: boolean; nextCheckAt: number }>('/switch/remove-content', 'POST', { switchId, contentId }),
+    signedReq<{ ok: boolean; nextCheckAt: number }>('/switch/remove-content', 'POST', { switchId, contentId }),
 
   listContents: (switchId: string) =>
     req<{ contents: { id: string; label: string; created_at: number }[] }>(`/switch/contents?switchId=${switchId}`),

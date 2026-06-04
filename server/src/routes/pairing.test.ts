@@ -8,6 +8,10 @@ process.env['DB_PATH'] = ':memory:';
 
 const { default: Fastify } = await import('fastify');
 const { pairingRoutes } = await import('./pairing.js');
+const { p256 } = await import('@noble/curves/p256');
+const { sha256 } = await import('@noble/hashes/sha256');
+const { bytesToHex } = await import('@noble/hashes/utils');
+const { canonicalize } = await import('../../../app/lib/canonicalize.js');
 
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string) => {
@@ -56,17 +60,21 @@ console.log('1) /pair — token inesistente → 404');
 // ── 2) /pair con token già usato → 404 al secondo tentativo ───────────────
 console.log('2) /pair — token già usato → 404');
 {
+  const ownerPriv = p256.utils.randomPrivateKey();
+  const ownerPub = bytesToHex(p256.getPublicKey(ownerPriv, true));
   const ownerRes = await app.inject({
     method: 'POST',
     url: '/owner/register',
-    payload: { publicKey: '04testowner0001', displayName: 'TestOwner' },
+    payload: { publicKey: ownerPub, displayName: 'TestOwner' },
   });
   const { ownerId } = JSON.parse(ownerRes.payload) as { ownerId: string };
 
+  const ts = Date.now();
+  const sig = bytesToHex(p256.sign(sha256(new TextEncoder().encode(canonicalize('POST', '/invite', ts, ownerPub, {}))), ownerPriv).toCompactRawBytes());
   const inviteRes = await app.inject({
     method: 'POST',
     url: '/invite',
-    payload: { ownerId },
+    payload: { pub: ownerPub, ts, sig },
   });
   const { token } = JSON.parse(inviteRes.payload) as { token: string };
 

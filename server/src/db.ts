@@ -94,6 +94,15 @@ CREATE TABLE IF NOT EXISTS audit (
   event TEXT NOT NULL,
   at INTEGER NOT NULL
 );
+
+-- Contatori per il rate limiting. Chiavi: ip:{ip}, submit:{switchId}:{ip},
+-- cumul:{switchId}:{ip} (cumulativo lifetme), lockout:{switchId}:{ip},
+-- lockout_window:{switchId}:{ip}.
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key TEXT PRIMARY KEY,
+  count INTEGER NOT NULL DEFAULT 0,
+  window_start INTEGER NOT NULL
+);
 `);
 
 // Migrazione idempotente: rimuove le colonne legacy da switches se ancora presenti

@@ -262,7 +262,7 @@ export default function Compose() {
       if (oldSwitchId) {
         try { await api.disarm(oldSwitchId); } catch { /* best effort: pulisce lo switch precedente */ }
       }
-      const { switchId } = await api.createSwitch(ownerId, intervalSec, graceSec);
+      const { switchId } = await api.createSwitch(intervalSec, graceSec);
       await saveSwitchId(switchId);
       await saveDek(switchId, bytesToHex(dek));
       const shares = splitSecret(dek, recipients.length, threshold);

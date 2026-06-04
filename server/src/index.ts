@@ -13,12 +13,16 @@ import { devBlobRoutes } from './routes/devblob.js';
 import { debugRoutes } from './routes/debug.js';
 import { auditRoutes } from './routes/audit.js';
 import { startScheduler } from './services/scheduler.js';
+import { registerIpRateLimitHook, cleanupExpiredEntries } from './services/rateLimiter.js';
 
 // bodyLimit allineato al tetto allegati. DevBlobProvider trasmette hex (2 byte per byte),
 // quindi max singolo allegato = 25 MB * 2 = 50 MB wire. 200 MB lascia ampio margine.
 const BODY_LIMIT = 200 * 1024 * 1024;
-const app = Fastify({ logger: true, bodyLimit: BODY_LIMIT });
+// trustProxy: true per leggere l'IP reale del client da X-Forwarded-For (necessario
+// quando il server è dietro un reverse proxy come nginx/caddy).
+const app = Fastify({ logger: true, bodyLimit: BODY_LIMIT, trustProxy: true });
 await app.register(cors, { origin: true });
+registerIpRateLimitHook(app);
 
 // Logga sempre lo stack server-side; espone solo un messaggio sicuro al client.
 // Le route devono usare reply.code(4xx).send({error,message}) per errori di input,
@@ -54,6 +58,7 @@ await app.register(debugRoutes);  // dev only (no-op in production)
 
 // IL BATTITO sta qui, non sul telefono.
 startScheduler(app.log);
+cleanupExpiredEntries();
 
 const port = Number(process.env.PORT ?? 4000);
 app.listen({ port, host: '0.0.0.0' })

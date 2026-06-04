@@ -1,5 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { db, audit } from '../db.js';
+import {
+  checkSuspiciousLockout,
+  checkSubmitLimit,
+  trackCumulativeSubmit,
+  clearCumulativeOnRelease,
+} from '../services/rateLimiter.js';
+import { getLimits } from '../config/limits.js';
+import { requireAuth } from '../middleware/auth.js';
 
 // SOGLIA + OCCULTAMENTO (k nascosto al server)
 // Il server NON conosce k. Custodisce blob opachi (reali + esche), raccoglie le
@@ -42,15 +50,55 @@ export async function approvalRoutes(app: FastifyInstance) {
     return { blobs: rows.map((r) => r.blob) };
   });
 
-  // Il contatto reinvia la quota decifrata (anonimo: solo l'indice x). Il server
-  // restituisce TUTTE le quote raccolte finora; sara' il client a tentare la
-  // ricombinazione (cosi' il server non sa quante ne servano).
-  app.post<{ Body: { switchId: string; share: { x: number; y: string } } }>(
+  // Il contatto reinvia la quota decifrata. L'identità è verificata via firma P-256 (requireAuth).
+  // Il server restituisce TUTTE le quote raccolte finora; il client tenta la ricombinazione.
+  // Rate-limit keyed per contact_id (non per IP) per evitare che diversi contatti si blocchino.
+  app.post<{ Body: { switchId: string; share: { x: number; y: string }; pub: string; ts: number; sig: string } }>(
     '/approval/submit',
-    async (req) => {
+    { preHandler: [requireAuth('contact-of-switch')] },
+    async (req, reply) => {
       const { switchId, share } = req.body;
-      db.prepare('UPDATE shares SET submitted_share = ? WHERE switch_id = ? AND x = ?')
-        .run(JSON.stringify(share), switchId, share.x);
+      const actorId = req.actor!.id;   // contact_id verificato dal middleware
+      const limits = getLimits();
+
+      // 1. Check lockout da pattern sospetto (prevale sul limite normale)
+      const lockout = checkSuspiciousLockout(actorId, switchId);
+      if (lockout.locked) {
+        const resetAt = lockout.resetAt ?? Date.now() + 3_600_000;
+        return reply
+          .header('X-RateLimit-Limit', String(limits.LOCKOUT_LIMIT_PER_HOUR))
+          .header('X-RateLimit-Remaining', '0')
+          .header('X-RateLimit-Reset', String(Math.floor(resetAt / 1000)))
+          .header('Retry-After', String(Math.max(1, Math.ceil((resetAt - Date.now()) / 1000))))
+          .code(429)
+          .send({ error: 'rate_limit_exceeded', message: 'Limite approvazioni raggiunto.' });
+      }
+
+      // 2. Se non in periodo di lockout, applica il limite orario normale
+      if (!lockout.isActiveLockout) {
+        const submitResult = checkSubmitLimit(actorId, switchId);
+        if (!submitResult.allowed) {
+          return reply
+            .header('X-RateLimit-Limit', String(limits.SUBMIT_PER_HOUR))
+            .header('X-RateLimit-Remaining', '0')
+            .header('X-RateLimit-Reset', String(Math.floor(submitResult.resetAt / 1000)))
+            .header('Retry-After', String(Math.max(1, Math.ceil((submitResult.resetAt - Date.now()) / 1000))))
+            .code(429)
+            .send({ error: 'rate_limit_exceeded', message: 'Limite approvazioni raggiunto.' });
+        }
+      }
+
+      // 3. Traccia il contatore cumulativo (può attivare lockout per le prossime richieste)
+      trackCumulativeSubmit(actorId, switchId);
+
+      // 4. Overwrite protection: AND submitted_share IS NULL
+      const info = db.prepare(
+        'UPDATE shares SET submitted_share = ? WHERE switch_id = ? AND x = ? AND submitted_share IS NULL'
+      ).run(JSON.stringify(share), switchId, share.x);
+      if (info.changes === 0) {
+        audit(switchId, 'SHARE_OVERWRITE_ATTEMPTED');
+        return reply.code(409).send({ error: 'share_gia_sottomessa', message: 'Quota già inviata per questo indice.' });
+      }
       audit(switchId, 'SHARE_SUBMITTED');
       const submitted = db.prepare(
         'SELECT submitted_share FROM shares WHERE switch_id = ? AND submitted_share IS NOT NULL'
@@ -60,10 +108,15 @@ export async function approvalRoutes(app: FastifyInstance) {
   );
 
   // Un client che e' riuscito a ricombinare+decifrare conferma il rilascio.
-  app.post<{ Body: { switchId: string } }>('/release/confirm', async (req) => {
-    db.prepare("UPDATE switches SET state='RELEASED' WHERE id=? AND state='APPROVAL_PENDING'")
-      .run(req.body.switchId);
-    audit(req.body.switchId, 'RELEASED');
-    return { ok: true };
-  });
+  app.post<{ Body: { switchId: string; pub: string; ts: number; sig: string } }>(
+    '/release/confirm',
+    { preHandler: [requireAuth('contact-of-switch')] },
+    async (req) => {
+      db.prepare("UPDATE switches SET state='RELEASED' WHERE id=? AND state='APPROVAL_PENDING'")
+        .run(req.body.switchId);
+      audit(req.body.switchId, 'RELEASED');
+      clearCumulativeOnRelease(req.body.switchId);
+      return { ok: true };
+    }
+  );
 }

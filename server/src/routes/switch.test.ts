@@ -1,11 +1,12 @@
-// Test validazione /switch/create: limiti dev vs produzione, conversione tempi, persistenza DB.
+// Test validazione /switch/*: auth, limiti dev vs produzione, conversione tempi, persistenza DB.
 export {};
 
 process.env['DB_PATH'] = ':memory:';
 
 const { default: Fastify } = await import('fastify');
-const { switchRoutes } = await import('./switch.js');
-const { db } = await import('../db.js');
+const { switchRoutes }     = await import('./switch.js');
+const { db }               = await import('../db.js');
+const { mkKeyPair, signBody } = await import('../testUtils/authHelpers.js');
 
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string) => {
@@ -24,6 +25,20 @@ async function buildApp() {
 
 const app = await buildApp();
 
+// ── Owner globale per tutti i test autenticati ────────────────────────────────
+// Inserito direttamente nel DB: evita di importare pairingRoutes.
+const owner = mkKeyPair();
+const ownerId = 'usr_sw_global';
+db.prepare('INSERT INTO users (id, public_key, created_at) VALUES (?,?,?)').run(ownerId, owner.pub, Date.now());
+
+let _ts = Date.now();
+function nextTs() { return ++_ts; }
+
+// Helper: payload firmato con l'owner globale
+function ownerBody(method: string, url: string, body: Record<string, unknown>): Record<string, unknown> {
+  return signBody(owner.priv, owner.pub, method, url, body, nextTs());
+}
+
 // ── 1) Conversione: 2 giorni = 172800 s (pura aritmetica) ────────────────────
 console.log('1) Conversione tempi: aritmetica pura');
 {
@@ -40,7 +55,7 @@ console.log('2) Produzione: intervallo 1800s (< 3600) → 400');
   process.env['NODE_ENV'] = 'production';
   const res = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_test', intervalSec: 1800, graceSec: 3600 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 1800, graceSec: 3600 }),
   });
   const body = JSON.parse(res.payload) as any;
   ok(res.statusCode === 400, `status 400 (ricevuto: ${res.statusCode})`);
@@ -53,7 +68,7 @@ console.log('3) Produzione: intervallo 32 giorni (> 31) → 400');
   process.env['NODE_ENV'] = 'production';
   const res = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_test', intervalSec: 32 * 86400, graceSec: 3600 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 32 * 86400, graceSec: 3600 }),
   });
   const body = JSON.parse(res.payload) as any;
   ok(res.statusCode === 400, `status 400 (ricevuto: ${res.statusCode})`);
@@ -66,7 +81,7 @@ console.log('4) Produzione: grazia 1800s (< 3600) → 400');
   process.env['NODE_ENV'] = 'production';
   const res = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_test', intervalSec: 86400, graceSec: 1800 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 86400, graceSec: 1800 }),
   });
   const body = JSON.parse(res.payload) as any;
   ok(res.statusCode === 400, `status 400 (ricevuto: ${res.statusCode})`);
@@ -79,7 +94,7 @@ console.log('5) Sviluppo: intervallo 30s → 200');
   process.env['NODE_ENV'] = 'test';
   const res = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_test', intervalSec: 30, graceSec: 10 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 30, graceSec: 10 }),
   });
   const body = JSON.parse(res.payload) as any;
   ok(res.statusCode === 200, `status 200 (ricevuto: ${res.statusCode})`);
@@ -93,7 +108,7 @@ console.log('6) Sviluppo: grazia 5s (< 10) → 400');
   process.env['NODE_ENV'] = 'test';
   const res = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_test', intervalSec: 30, graceSec: 5 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 30, graceSec: 5 }),
   });
   const body = JSON.parse(res.payload) as any;
   ok(res.statusCode === 400, `status 400 (ricevuto: ${res.statusCode})`);
@@ -106,7 +121,7 @@ console.log('7) Preset giornaliero (86400s) e grazia 6h (21600s) → interval_se
   process.env['NODE_ENV'] = 'test';
   const res = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_test2', intervalSec: 86400, graceSec: 21600 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 86400, graceSec: 21600 }),
   });
   const body = JSON.parse(res.payload) as any;
   ok(res.statusCode === 200, `status 200 (ricevuto: ${res.statusCode})`);
@@ -122,7 +137,7 @@ console.log('8) Preset settimanale (604800s) e grazia 1g (86400s) → DB corrett
   process.env['NODE_ENV'] = 'test';
   const res = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_test3', intervalSec: 604800, graceSec: 86400 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 604800, graceSec: 86400 }),
   });
   const body = JSON.parse(res.payload) as any;
   ok(res.statusCode === 200, `status 200 (ricevuto: ${res.statusCode})`);
@@ -138,7 +153,7 @@ console.log('9) Produzione: intervallo esattamente 3600s (limite) → 200');
   process.env['NODE_ENV'] = 'production';
   const res = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_test4', intervalSec: 3600, graceSec: 3600 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 3600, graceSec: 3600 }),
   });
   ok(res.statusCode === 200, `status 200 (ricevuto: ${res.statusCode})`);
 }
@@ -149,18 +164,18 @@ console.log('10) Produzione: preset Ogni 2 giorni (172800s) → 200');
   process.env['NODE_ENV'] = 'production';
   const res = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_test5', intervalSec: 172800, graceSec: 21600 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 172800, graceSec: 21600 }),
   });
   ok(res.statusCode === 200, `status 200 (ricevuto: ${res.statusCode})`);
 }
 
-// ── 9) Custom 60s in dev → DB ha esattamente interval_sec=60, grace_sec=60 ───
-console.log('9) Dev custom 60s: interval_sec=60 e grace_sec=60 nel DB — non i default 86400/21600');
+// ── 11) Dev custom 60s: interval_sec=60 e grace_sec=60 nel DB ─────────────────
+console.log('11) Dev custom 60s: interval_sec=60 e grace_sec=60 nel DB — non i default');
 {
   process.env['NODE_ENV'] = 'test';
   const res = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_custom60', intervalSec: 60, graceSec: 60 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 60, graceSec: 60 }),
   });
   const body = JSON.parse(res.payload) as any;
   ok(res.statusCode === 200, `status 200 (ricevuto: ${res.statusCode})`);
@@ -168,17 +183,18 @@ console.log('9) Dev custom 60s: interval_sec=60 e grace_sec=60 nel DB — non i 
 
   const sw = db.prepare('SELECT interval_sec, grace_sec FROM switches WHERE id=?').get(body.switchId) as any;
   ok(sw?.interval_sec === 60,
-    `interval_sec=60 nel DB (ricevuto: ${sw?.interval_sec}) — non il default 86400`);
+    `interval_sec=60 nel DB (ricevuto: ${sw?.interval_sec})`);
   ok(sw?.grace_sec === 60,
-    `grace_sec=60 nel DB (ricevuto: ${sw?.grace_sec}) — non il default 21600`);
+    `grace_sec=60 nel DB (ricevuto: ${sw?.grace_sec})`);
 }
 
-// Helper: crea uno switch ACTIVE con un contenuto iniziale in switch_contents.
-async function mkActiveWithContent(ownerId: string, ptr = 'ptr-0', iv = 'iv-0', label = 'Test') {
+// Helper: crea uno switch ACTIVE con un contenuto iniziale.
+// Tutte le richieste HTTP usano l'owner globale.
+async function mkActiveWithContent(ptr = 'ptr-0', iv = 'iv-0', label = 'Test') {
   process.env['NODE_ENV'] = 'test';
   const cr = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId, intervalSec: 30, graceSec: 10 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 30, graceSec: 10 }),
   });
   const { switchId } = JSON.parse(cr.payload) as any;
   const now = Date.now();
@@ -190,19 +206,21 @@ async function mkActiveWithContent(ownerId: string, ptr = 'ptr-0', iv = 'iv-0', 
   return { switchId, contentId };
 }
 
-// ── 11) arm → inserisce riga in switch_contents e restituisce contentId ────────
-console.log('11) arm → switch_contents ha 1 riga, risposta include contentId');
+// ── 12) arm → inserisce riga in switch_contents e restituisce contentId ────────
+console.log('12) arm → switch_contents ha 1 riga, risposta include contentId');
 {
   process.env['NODE_ENV'] = 'test';
   const cr = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_arm1', intervalSec: 30, graceSec: 10 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 30, graceSec: 10 }),
   });
   const { switchId } = JSON.parse(cr.payload) as any;
 
   const armRes = await app.inject({
     method: 'POST', url: '/switch/arm',
-    payload: { switchId, drivePointer: 'arm-ptr', contentIv: 'arm-iv', label: 'Prima versione', shares: [] },
+    payload: ownerBody('POST', '/switch/arm', {
+      switchId, drivePointer: 'arm-ptr', contentIv: 'arm-iv', label: 'Prima versione', shares: [],
+    }),
   });
   const armBody = JSON.parse(armRes.payload) as any;
   ok(armRes.statusCode === 200, `arm status 200 (${armRes.statusCode})`);
@@ -215,14 +233,16 @@ console.log('11) arm → switch_contents ha 1 riga, risposta include contentId')
   ok(rows[0].label         === 'Prima versione', `label corretto`);
 }
 
-// ── 12) add-content appende nuova riga (NON sovrascrive) ──────────────────────
-console.log('12) add-content su ACTIVE → append: switch_contents ha 2 righe');
+// ── 13) add-content appende nuova riga (NON sovrascrive) ──────────────────────
+console.log('13) add-content su ACTIVE → append: switch_contents ha 2 righe');
 {
-  const { switchId } = await mkActiveWithContent('usr_add1', 'old-ptr', 'old-iv', 'Contenuto 1');
+  const { switchId } = await mkActiveWithContent('old-ptr', 'old-iv', 'Contenuto 1');
 
   const addRes = await app.inject({
     method: 'POST', url: '/switch/add-content',
-    payload: { switchId, drivePointer: 'new-ptr', contentIv: 'new-iv', label: 'Contenuto 2' },
+    payload: ownerBody('POST', '/switch/add-content', {
+      switchId, drivePointer: 'new-ptr', contentIv: 'new-iv', label: 'Contenuto 2',
+    }),
   });
   const addBody = JSON.parse(addRes.payload) as any;
   ok(addRes.statusCode === 200, `status 200 (${addRes.statusCode})`);
@@ -236,69 +256,69 @@ console.log('12) add-content su ACTIVE → append: switch_contents ha 2 righe');
   ok(rows[1].drive_pointer === 'new-ptr', `seconda riga aggiunta`);
 }
 
-// ── 13) add-content resetta il timer (check-in) ───────────────────────────────
-console.log('13) add-content → next_check_at rinnovato');
+// ── 14) add-content resetta il timer ─────────────────────────────────────────
+console.log('14) add-content → next_check_at rinnovato');
 {
-  const { switchId } = await mkActiveWithContent('usr_add2');
+  const { switchId } = await mkActiveWithContent();
   const before = (db.prepare('SELECT next_check_at FROM switches WHERE id=?').get(switchId) as any).next_check_at;
 
-  await new Promise(r => setTimeout(r, 5)); // assicura timestamp diverso
+  await new Promise(r => setTimeout(r, 5));
   await app.inject({
     method: 'POST', url: '/switch/add-content',
-    payload: { switchId, drivePointer: 'p2', contentIv: 'iv2' },
+    payload: ownerBody('POST', '/switch/add-content', { switchId, drivePointer: 'p2', contentIv: 'iv2' }),
   });
   const after = (db.prepare('SELECT next_check_at FROM switches WHERE id=?').get(switchId) as any).next_check_at;
   ok(after !== before, `next_check_at cambiato (${before} → ${after})`);
 }
 
-// ── 14) add-content DISARMED → 409 ────────────────────────────────────────────
-console.log('14) add-content su DISARMED → 409');
+// ── 15) add-content DISARMED → 409 ────────────────────────────────────────────
+console.log('15) add-content su DISARMED → 409');
 {
   process.env['NODE_ENV'] = 'test';
   const cr = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_add3', intervalSec: 30, graceSec: 10 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 30, graceSec: 10 }),
   });
   const { switchId } = JSON.parse(cr.payload) as any;
   const res = await app.inject({
     method: 'POST', url: '/switch/add-content',
-    payload: { switchId, drivePointer: 'p', contentIv: 'iv' },
+    payload: ownerBody('POST', '/switch/add-content', { switchId, drivePointer: 'p', contentIv: 'iv' }),
   });
   const body = JSON.parse(res.payload) as any;
   ok(res.statusCode === 409, `status 409 (${res.statusCode})`);
   ok(body.error === 'switch_non_attivo', `error corretto`);
 }
 
-// ── 15) add-content switch inesistente → 404 ──────────────────────────────────
-console.log('15) add-content switch inesistente → 404');
+// ── 16) add-content switch inesistente → 401 (owner-of-switch lookup fallisce) ─
+console.log('16) add-content switch inesistente → 401');
 {
   const res = await app.inject({
     method: 'POST', url: '/switch/add-content',
-    payload: { switchId: 'sw_nonexistent_xyz', drivePointer: 'p', contentIv: 'iv' },
+    payload: ownerBody('POST', '/switch/add-content', { switchId: 'sw_nonexistent_xyz', drivePointer: 'p', contentIv: 'iv' }),
   });
-  ok(res.statusCode === 404, `status 404 (${res.statusCode})`);
+  // Auth lookup: owner-of-switch join non trova righe → 401
+  ok(res.statusCode === 401 || res.statusCode === 404, `status 401 o 404 (${res.statusCode})`);
 }
 
-// ── 16) add-content APPROVAL_PENDING → 409 ────────────────────────────────────
-console.log('16) add-content APPROVAL_PENDING → 409');
+// ── 17) add-content APPROVAL_PENDING → 409 ────────────────────────────────────
+console.log('17) add-content APPROVAL_PENDING → 409');
 {
-  const { switchId } = await mkActiveWithContent('usr_add4');
+  const { switchId } = await mkActiveWithContent();
   db.prepare("UPDATE switches SET state='APPROVAL_PENDING' WHERE id=?").run(switchId);
   const res = await app.inject({
     method: 'POST', url: '/switch/add-content',
-    payload: { switchId, drivePointer: 'p', contentIv: 'iv' },
+    payload: ownerBody('POST', '/switch/add-content', { switchId, drivePointer: 'p', contentIv: 'iv' }),
   });
   ok(res.statusCode === 409, `status 409 (${res.statusCode})`);
 }
 
-// ── 17) remove-content: rimuove riga, resetta timer ───────────────────────────
-console.log('17) remove-content → riga rimossa, timer resettato');
+// ── 18) remove-content: rimuove riga, resetta timer ───────────────────────────
+console.log('18) remove-content → riga rimossa, timer resettato');
 {
-  const { switchId, contentId: firstId } = await mkActiveWithContent('usr_rm1', 'p1', 'iv1', 'A');
-  // Aggiungi secondo contenuto per poter rimuovere il primo
+  const { switchId, contentId: firstId } = await mkActiveWithContent('p1', 'iv1', 'A');
   const addRes = await app.inject({
     method: 'POST', url: '/switch/add-content',
-    payload: { switchId, drivePointer: 'p2', contentIv: 'iv2', label: 'B' },
+    payload: ownerBody('POST', '/switch/add-content', { switchId, drivePointer: 'p2', contentIv: 'iv2', label: 'B' }),
   });
   const { contentId: secondId } = JSON.parse(addRes.payload) as any;
   const before = (db.prepare('SELECT next_check_at FROM switches WHERE id=?').get(switchId) as any).next_check_at;
@@ -306,7 +326,7 @@ console.log('17) remove-content → riga rimossa, timer resettato');
   await new Promise(r => setTimeout(r, 5));
   const rmRes = await app.inject({
     method: 'POST', url: '/switch/remove-content',
-    payload: { switchId, contentId: firstId },
+    payload: ownerBody('POST', '/switch/remove-content', { switchId, contentId: firstId }),
   });
   const rmBody = JSON.parse(rmRes.payload) as any;
   ok(rmRes.statusCode === 200, `status 200 (${rmRes.statusCode})`);
@@ -320,13 +340,13 @@ console.log('17) remove-content → riga rimossa, timer resettato');
   ok(after !== before, 'timer resettato dopo rimozione');
 }
 
-// ── 18) remove-content ultimo contenuto → 409 ─────────────────────────────────
-console.log('18) remove-content su ultimo contenuto → 409 (minimo un contenuto)');
+// ── 19) remove-content ultimo contenuto → 409 ─────────────────────────────────
+console.log('19) remove-content su ultimo contenuto → 409 (minimo un contenuto)');
 {
-  const { switchId, contentId } = await mkActiveWithContent('usr_rm2');
+  const { switchId, contentId } = await mkActiveWithContent();
   const res = await app.inject({
     method: 'POST', url: '/switch/remove-content',
-    payload: { switchId, contentId },
+    payload: ownerBody('POST', '/switch/remove-content', { switchId, contentId }),
   });
   const body = JSON.parse(res.payload) as any;
   ok(res.statusCode === 409, `status 409 (${res.statusCode})`);
@@ -335,39 +355,41 @@ console.log('18) remove-content su ultimo contenuto → 409 (minimo un contenuto
   ok(rows.length === 1, `riga intatta nel DB`);
 }
 
-// ── 19) remove-content switch inesistente → 404 ───────────────────────────────
-console.log('19) remove-content switch inesistente → 404');
+// ── 20) remove-content switch inesistente → 401 ───────────────────────────────
+console.log('20) remove-content switch inesistente → 401');
 {
   const res = await app.inject({
     method: 'POST', url: '/switch/remove-content',
-    payload: { switchId: 'sw_xxx', contentId: 'sc_xxx' },
+    payload: ownerBody('POST', '/switch/remove-content', { switchId: 'sw_xxx', contentId: 'sc_xxx' }),
   });
-  ok(res.statusCode === 404, `status 404 (${res.statusCode})`);
+  ok(res.statusCode === 401 || res.statusCode === 404, `status 401 o 404 (${res.statusCode})`);
 }
 
-// ── 20) remove-content switch non ACTIVE → 409 ────────────────────────────────
-console.log('20) remove-content switch DISARMED → 409');
+// ── 21) remove-content switch DISARMED → 409 ──────────────────────────────────
+console.log('21) remove-content switch DISARMED → 409');
 {
   process.env['NODE_ENV'] = 'test';
   const cr = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_rm3', intervalSec: 30, graceSec: 10 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 30, graceSec: 10 }),
   });
   const { switchId } = JSON.parse(cr.payload) as any;
   const res = await app.inject({
     method: 'POST', url: '/switch/remove-content',
-    payload: { switchId, contentId: 'sc_whatever' },
+    payload: ownerBody('POST', '/switch/remove-content', { switchId, contentId: 'sc_whatever' }),
   });
   ok(res.statusCode === 409, `status 409 (${res.statusCode})`);
 }
 
-// ── 21) /switch/contents → lista label/id (no puntatori) ─────────────────────
-console.log('21) /switch/contents → lista label+id, nessun pointer esposto');
+// ── 22) /switch/contents → lista label/id (no puntatori) ─────────────────────
+console.log('22) /switch/contents → lista label+id, nessun pointer esposto');
 {
-  const { switchId } = await mkActiveWithContent('usr_list1', 'secret-ptr', 'iv', 'Primo');
+  const { switchId } = await mkActiveWithContent('secret-ptr', 'iv', 'Primo');
   await app.inject({
     method: 'POST', url: '/switch/add-content',
-    payload: { switchId, drivePointer: 'secret-ptr2', contentIv: 'iv2', label: 'Secondo' },
+    payload: ownerBody('POST', '/switch/add-content', {
+      switchId, drivePointer: 'secret-ptr2', contentIv: 'iv2', label: 'Secondo',
+    }),
   });
 
   const res = await app.inject({ method: 'GET', url: `/switch/contents?switchId=${switchId}` });
@@ -383,27 +405,29 @@ console.log('21) /switch/contents → lista label+id, nessun pointer esposto');
   ok(!('content_iv'    in body.contents[0]), `content_iv NON esposto`);
 }
 
-// ── 22) arm + 2 add-content → 3 righe in switch_contents ─────────────────────
-console.log('22) arm + 2× add-content → 3 righe totali nel pacchetto');
+// ── 23) arm + 2 add-content → 3 righe in switch_contents ─────────────────────
+console.log('23) arm + 2× add-content → 3 righe totali nel pacchetto');
 {
   process.env['NODE_ENV'] = 'test';
   const cr = await app.inject({
     method: 'POST', url: '/switch/create',
-    payload: { ownerId: 'usr_multi', intervalSec: 30, graceSec: 10 },
+    payload: ownerBody('POST', '/switch/create', { intervalSec: 30, graceSec: 10 }),
   });
   const { switchId } = JSON.parse(cr.payload) as any;
 
   await app.inject({
     method: 'POST', url: '/switch/arm',
-    payload: { switchId, drivePointer: 'p0', contentIv: 'iv0', label: 'Base', shares: [] },
+    payload: ownerBody('POST', '/switch/arm', {
+      switchId, drivePointer: 'p0', contentIv: 'iv0', label: 'Base', shares: [],
+    }),
   });
   await app.inject({
     method: 'POST', url: '/switch/add-content',
-    payload: { switchId, drivePointer: 'p1', contentIv: 'iv1', label: 'Aggiunta 1' },
+    payload: ownerBody('POST', '/switch/add-content', { switchId, drivePointer: 'p1', contentIv: 'iv1', label: 'Aggiunta 1' }),
   });
   await app.inject({
     method: 'POST', url: '/switch/add-content',
-    payload: { switchId, drivePointer: 'p2', contentIv: 'iv2', label: 'Aggiunta 2' },
+    payload: ownerBody('POST', '/switch/add-content', { switchId, drivePointer: 'p2', contentIv: 'iv2', label: 'Aggiunta 2' }),
   });
 
   const rows = db.prepare('SELECT drive_pointer FROM switch_contents WHERE switch_id=? ORDER BY created_at').all(switchId) as any[];

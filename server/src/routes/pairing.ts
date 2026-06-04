@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { p256 } from '@noble/curves/p256';
 import { sha256 } from '@noble/hashes/sha256';
 import { hexToBytes } from '@noble/hashes/utils';
+import { requireAuth } from '../middleware/auth.js';
 
 // Verifica firma timestampata (window 5 min, previene replay).
 // challenge deve includere ts come parte del messaggio firmato dall'app via signChallenge.
@@ -40,16 +41,27 @@ export async function pairingRoutes(app: FastifyInstance) {
   );
 
   // ── Invito monouso ────────────────────────────────────────────────────────────
-  app.post<{ Body: { ownerId: string } }>('/invite', async (req, reply) => {
-    const owner = db.prepare('SELECT public_key FROM users WHERE id = ?').get(req.body.ownerId) as
-      | { public_key: string } | undefined;
-    if (!owner) return reply.code(404).send({ error: 'owner_non_trovato', message: 'Owner non trovato.' });
-    const token = nanoid(16);
-    db.prepare('INSERT INTO invites (token, owner_id, owner_public_key, created_at) VALUES (?,?,?,?)')
-      .run(token, req.body.ownerId, owner.public_key, Date.now());
-    // Questo oggetto è ciò che finisce nel QR mostrato di persona.
-    return { token, ownerPublicKey: owner.public_key };
-  });
+  // requireAuth('owner'): solo un owner registrato può generare inviti.
+  // ownerId è derivato da req.actor.id; body.ownerId (se presente) è validato per coerenza.
+  app.post<{ Body: { pub: string; ts: number; sig: string; ownerId?: string } }>(
+    '/invite',
+    { preHandler: [requireAuth('owner')] },
+    async (req, reply) => {
+      const ownerId = req.actor!.id;
+      // Sanity-check opzionale: se il client invia ownerId, deve coincidere con l'actor
+      if (req.body.ownerId && req.body.ownerId !== ownerId) {
+        return reply.code(400).send({ error: 'owner_mismatch', message: 'ownerId non corrisponde all\'identità firmante.' });
+      }
+      const owner = db.prepare('SELECT public_key FROM users WHERE id = ?').get(ownerId) as
+        | { public_key: string } | undefined;
+      if (!owner) return reply.code(404).send({ error: 'owner_non_trovato', message: 'Owner non trovato.' });
+      const token = nanoid(16);
+      db.prepare('INSERT INTO invites (token, owner_id, owner_public_key, created_at) VALUES (?,?,?,?)')
+        .run(token, ownerId, owner.public_key, Date.now());
+      // Questo oggetto è ciò che finisce nel QR mostrato di persona.
+      return { token, ownerPublicKey: owner.public_key };
+    }
+  );
 
   // ── Completamento pairing ─────────────────────────────────────────────────────
   app.post<{ Body: { token: string; contactPublicKey: string; pushToken?: string } }>(

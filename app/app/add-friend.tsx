@@ -67,7 +67,7 @@ export default function AddFriend() {
   async function startAsOwner() {
     const ownerId = await loadOwnerId();
     if (!ownerId) { alert('Registra prima il tuo account.'); return; }
-    const invite = await api.createInvite(ownerId); // {token, ownerPublicKey}
+    const invite = await api.createInvite(); // {token, ownerPublicKey}
     setQrA(invite);
     setRole('owner');
     setStep('owner_show_a');
