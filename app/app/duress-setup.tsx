@@ -16,11 +16,15 @@ import { api } from '../lib/api';
 type Step = 'auth-pin' | 'auth-biometric' | 'status' | 'choose-mode' | 'set-pin' | 'confirm-trigger' | 'delete-confirm';
 
 // PIN deboli comunemente usati: vietati per il PIN di coercizione (≥ 6 cifre).
+// 28 pattern: ripetizioni, sequenze, tastiera numerica, palindrome, alternanze.
 const BLACKLIST = [
   '000000', '111111', '222222', '333333', '444444', '555555',
   '666666', '777777', '888888', '999999',
   '123456', '654321', '234567', '987654',
   '112233', '123123', '121212', '000001',
+  '012345', '098765', '159753', '147258',
+  '369852', '123321', '131313', '232323',
+  '202020', '808080',
 ];
 
 const CONFIRM_TRIGGER_PHRASE = 'HO CAPITO';

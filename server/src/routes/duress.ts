@@ -49,16 +49,6 @@ export async function duressRoutes(app: FastifyInstance) {
         });
       }
 
-      try {
-        appendToChain({
-          chain_owner_id: ownerId,
-          event_type:     'DURESS_TRIGGERED_INITIATED',
-          actor_id:       ownerId,
-          payload:        {},
-          signature:      req.body.sig,
-        });
-      } catch (e) { console.error('auditChain DURESS_TRIGGERED_INITIATED', e); }
-
       const switches = db.prepare(
         "SELECT id FROM switches WHERE owner_id = ? AND state IN ('ACTIVE','GRACE')"
       ).all(ownerId) as { id: string }[];
@@ -66,22 +56,39 @@ export async function duressRoutes(app: FastifyInstance) {
       const owner = db.prepare('SELECT display_name FROM users WHERE id = ?')
         .get(ownerId) as { display_name: string | null } | undefined;
 
-      let switchesTriggered = 0;
-
-      for (const sw of switches) {
-        db.prepare("UPDATE switches SET state='APPROVAL_PENDING' WHERE id=?").run(sw.id);
-        audit(sw.id, 'DURESS_TRIGGERED');
-
+      // Tutti gli UPDATE sono atomici: o passano tutti o nessuno.
+      // DURESS_TRIGGERED_INITIATED è dentro la transazione per coerenza con gli UPDATE.
+      // Le push sono fuori: I/O di rete non è rollbackabile e bloccherebbe il commit.
+      const updateAll = db.transaction(() => {
         try {
           appendToChain({
             chain_owner_id: ownerId,
-            event_type:     'DURESS_TRIGGERED',
+            event_type:     'DURESS_TRIGGERED_INITIATED',
             actor_id:       ownerId,
-            payload:        { switchId: sw.id },
+            payload:        {},
             signature:      req.body.sig,
           });
-        } catch (e) { console.error('auditChain DURESS_TRIGGERED', e); }
+        } catch (e) { console.error('auditChain DURESS_TRIGGERED_INITIATED', e); }
 
+        for (const sw of switches) {
+          db.prepare("UPDATE switches SET state='APPROVAL_PENDING' WHERE id=?").run(sw.id);
+          audit(sw.id, 'DURESS_TRIGGERED');
+
+          try {
+            appendToChain({
+              chain_owner_id: ownerId,
+              event_type:     'DURESS_TRIGGERED',
+              actor_id:       ownerId,
+              payload:        { switchId: sw.id },
+              signature:      req.body.sig,
+            });
+          } catch (e) { console.error('auditChain DURESS_TRIGGERED', e); }
+        }
+      });
+      updateAll();
+
+      // Push fuori dalla transazione: rete non è rollbackabile.
+      if (switches.length > 0) {
         const contacts = db.prepare('SELECT push_token FROM contacts WHERE owner_id = ?')
           .all(ownerId) as { push_token: string | null }[];
         const msgs = contacts
@@ -90,11 +97,9 @@ export async function duressRoutes(app: FastifyInstance) {
         if (msgs.length) {
           sendPush(msgs, app.log as any).catch(() => {});
         }
-
-        switchesTriggered++;
       }
 
-      return { ok: true, switchesTriggered };
+      return { ok: true, switchesTriggered: switches.length };
     }
   );
 }
