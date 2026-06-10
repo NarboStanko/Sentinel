@@ -26,6 +26,11 @@ export async function loadOwnerId(): Promise<string | null> {
   return SecureStore.getItemAsync(OWNER_ID_KEY);
 }
 
+export async function clearAllIdentity(): Promise<void> {
+  await SecureStore.deleteItemAsync(SEED_KEY);
+  await SecureStore.deleteItemAsync(OWNER_ID_KEY);
+}
+
 const SWITCH_KEY = 'sentinella.switchId';
 export async function saveSwitchId(id: string) { await SecureStore.setItemAsync(SWITCH_KEY, id); }
 export async function loadSwitchId(): Promise<string | null> { return SecureStore.getItemAsync(SWITCH_KEY); }

@@ -1,20 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { View, Text, TextInput } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Screen, Card, Button, T } from '../components/ui';
 import { colors, space, radius } from '../theme';
-import { loadSeed } from '../lib/keystore';
 
 export default function VerifySeed() {
-  const [storedSeed, setStoredSeed] = useState<string | null>(null);
+  const { seed: storedSeed } = useLocalSearchParams<{ seed: string }>();
   const [inputs, setInputs] = useState<string[]>(Array(12).fill(''));
   const [checked, setChecked] = useState(false);
   const [mismatches, setMismatches] = useState<boolean[]>(Array(12).fill(false));
   const [allCorrect, setAllCorrect] = useState(false);
-
-  useEffect(() => {
-    loadSeed().then((s) => setStoredSeed(s));
-  }, []);
 
   function handleChange(i: number, val: string) {
     const next = [...inputs];

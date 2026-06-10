@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Text, Pressable, Alert } from 'react-native';
 import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { Screen, Card, Button, T } from '../components/ui';
 import { colors, radius, space } from '../theme';
 import { newSeedPhrase, identityFromSeed, bytesToHex } from '../lib/crypto';
-import { saveSeed, loadIdentity, saveOwnerId } from '../lib/keystore';
+import { saveSeed, loadIdentity, loadOwnerId, saveOwnerId } from '../lib/keystore';
 import { api } from '../lib/api';
 import { registerPushToken } from '../lib/notifications';
 
@@ -15,7 +15,13 @@ export default function Onboarding() {
   const [confirmedBackup, setConfirmedBackup] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => { loadIdentity().then((id) => { if (id) router.replace('/home'); }); }, []);
+  useEffect(() => {
+    (async () => {
+      const id = await loadIdentity();
+      const ownerId = await loadOwnerId();
+      if (id && ownerId) router.replace('/home');
+    })();
+  }, []);
 
   function generate() {
     setSeed(newSeedPhrase());
@@ -35,16 +41,22 @@ export default function Onboarding() {
     if (!seed || !confirmedBackup) return;
     setBusy(true);
     try {
-      await saveSeed(seed);
       const id = identityFromSeed(seed);
       const { ownerId } = await api.registerOwner(bytesToHex(id.pub));
+      // Save locally only after server registration succeeds — keeps state consistent.
+      await saveSeed(seed);
       await saveOwnerId(ownerId);
       // Registra subito il push token: senza, l'owner non riceve la notifica
       // «Tutto ok?» fino al riavvio successivo dell'app (il _layout la chiama
       // solo se ownerId era già presente all'avvio).
       registerPushToken('owner', ownerId).catch(() => {});
       router.replace('/home');
-    } finally { setBusy(false); }
+    } catch (e: any) {
+      console.error('[onboarding]', e);
+      Alert.alert('Onboarding fallito', e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   const words = seed?.split(' ') ?? [];
@@ -96,7 +108,7 @@ export default function Onboarding() {
 
           <Button
             label="Verifica che le hai scritte (consigliato)"
-            onPress={async () => { if (seed) { await saveSeed(seed); router.push('/verify-seed'); } }}
+            onPress={() => { if (seed) router.push({ pathname: '/verify-seed', params: { seed } }); }}
             variant="ghost"
           />
 
