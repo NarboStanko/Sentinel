@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+  <!-- DEV ONLY: permette HTTP non cifrato SOLO verso il server di sviluppo locale.
+       In produzione (HTTPS via Let's Encrypt) questo file va rimosso o svuotato. -->
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">192.168.0.210</domain>
+  </domain-config>
+</network-security-config>
