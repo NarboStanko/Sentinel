@@ -12,3 +12,7 @@ dist/
 .env
 .expo
 
+
+server/sentinella.db
+server/sentinella.db-shm
+server/sentinella.db-wal
