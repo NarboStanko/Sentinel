@@ -100,7 +100,9 @@ export default function Home() {
       <View style={{ gap: space(3), marginTop: space(2) }}>
         <Button label="Contatti fidati" onPress={() => router.push('/contacts')} variant="ghost" />
         <Button label="Backup seed" onPress={() => router.push('/backup')} variant="ghost" />
+        <Button label="PIN di emergenza" onPress={() => router.push('/duress-setup')} variant="ghost" />
         <Button label="Recovery" onPress={() => router.push('/social-recovery')} variant="ghost" />
+        <Button label="Strumenti di verifica" onPress={() => router.push('/audit-tools')} variant="ghost" />
         {sw?.state === 'ACTIVE' && (
           <Button label="Aggiungi al pacchetto" onPress={() => router.push({ pathname: '/compose', params: { mode: 'add' } })} variant="ghost" />
         )}

@@ -211,7 +211,9 @@ export default function Compose() {
   }
 
   // ── Arma lo switch (prima armo o ri-armo con nuovi contatti) ───────────────
-  const limits = __DEV__ ? DEV_LIMITS : PROD_LIMITS;
+  // Minimi abbassati a 60s anche in release per permettere test rapidi sul server
+  // dev (che con NODE_ENV !== 'production' accetta fino a 30s/10s).
+  const limits = __DEV__ ? DEV_LIMITS : { ...PROD_LIMITS, intervalMin: 60, graceMin: 60 };
   const intervalSec = intervalPreset !== 'custom'
     ? INTERVAL_PRESETS.find(p => p.id === intervalPreset)!.seconds
     : toSeconds(parseInt(customINum) || 0, customIUnit);
@@ -404,7 +406,7 @@ export default function Compose() {
                   <TextInput value={customINum} onChangeText={setCustomINum} keyboardType="number-pad"
                     style={[field, { width: 70 }]} />
                   <View style={{ flexDirection: 'row', gap: space(1) }}>
-                    {(['hours', 'days'] as TimeUnit[]).concat(__DEV__ ? ['seconds' as TimeUnit] : []).map(u => (
+                    {(['hours', 'days', 'seconds'] as TimeUnit[]).map(u => (
                       <Pressable key={u} onPress={() => setCustomIUnit(u)}
                         style={[chip, customIUnit === u && chipSel]}>
                         <Text style={[chipTxt, customIUnit === u && chipTxtSel]}>
@@ -433,7 +435,7 @@ export default function Compose() {
                 <TextInput value={graceNum} onChangeText={setGraceNum} keyboardType="number-pad"
                   style={[field, { width: 70 }]} />
                 <View style={{ flexDirection: 'row', gap: space(1) }}>
-                  {(['hours', 'days'] as TimeUnit[]).concat(__DEV__ ? ['seconds' as TimeUnit] : []).map(u => (
+                  {(['hours', 'days', 'seconds'] as TimeUnit[]).map(u => (
                     <Pressable key={u} onPress={() => setGraceUnit(u)}
                       style={[chip, graceUnit === u && chipSel]}>
                       <Text style={[chipTxt, graceUnit === u && chipTxtSel]}>

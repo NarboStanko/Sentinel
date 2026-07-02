@@ -2,6 +2,7 @@ import 'react-native-get-random-values';
 import { useEffect, useRef } from 'react';
 import { Stack, router } from 'expo-router';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { colors } from '../theme';
 import { setupNotificationChannel, registerPushToken } from '../lib/notifications';
 import { loadOwnerId, loadIdentity } from '../lib/keystore';
@@ -9,11 +10,13 @@ import { setActiveProvider } from '../lib/storage';
 import { DevBlobProvider } from '../lib/storage/devBlob';
 
 // Provider di storage inizializzato a livello di modulo (prima di qualsiasi render).
-// Dev: DevBlobProvider attivo di default — nessuna azione manuale richiesta.
-// Produzione: nessun default; GoogleDriveProvider va attivato dopo che l'utente
-// ha completato l'OAuth (chiama setActiveProvider(new GoogleDriveProvider()) dopo
+// Scelto da extra.storageProvider in app.json: 'devblob' attiva DevBlobProvider
+// (test, anche in build release); assente → 'devblob' solo in __DEV__, 'none' altrove.
+// 'none': nessun provider di default — GoogleDriveProvider verrà attivato dopo
+// l'OAuth (chiama setActiveProvider(new GoogleDriveProvider()) dopo
 // provider.authorize() nella schermata di configurazione storage).
-if (__DEV__) {
+const storageProviderName = (Constants.expoConfig?.extra?.storageProvider as string) ?? (__DEV__ ? 'devblob' : 'none');
+if (storageProviderName === 'devblob') {
   setActiveProvider(new DevBlobProvider());
 }
 

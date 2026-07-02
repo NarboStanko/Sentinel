@@ -32,6 +32,7 @@
     },
     "extra": {
       "serverUrl": "http://192.168.0.210:4000",
+      "storageProvider": "devblob",
       "router": {
         "origin": false
       },

@@ -3,7 +3,7 @@ import { View, Text, TextInput } from 'react-native';
 import { router } from 'expo-router';
 import * as ScreenCapture from 'expo-screen-capture';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { randomBytes } from '../lib/crypto';
+import { randomBytes, bytesToHex } from '../lib/crypto';
 import { hashPin } from '../lib/pinHash';
 import { Screen, Card, Button, T } from '../components/ui';
 import { colors, space, radius } from '../theme';
