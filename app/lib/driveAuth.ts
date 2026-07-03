@@ -1,62 +1,90 @@
-// Flusso di connessione Google Drive: ottiene i primi token e attiva il
-// GoogleDriveProvider. NON reimplementa nulla: upload/download/refresh e la
-// persistenza token vivono già in storage/googleDrive.ts — qui c'è solo
-// l'orchestrazione (login, riattivazione all'avvio, stato, disconnessione).
+// Connessione Google Drive via Google Sign-In NATIVO (selettore account Android):
+// nessun redirect URI, nessun browser, refresh token gestito nativamente.
+// Il GoogleDriveProvider (upload/download/delete) è riusato tal quale: riceve
+// da qui una token-source (getDriveAccessToken) e non gestisce più OAuth.
 //
-// Sicurezza: PKCE puro, NESSUN client secret (i client ID OAuth sono pubblici
-// per definizione; il flusso nativo non deve mai contenere il secret).
-//
-// NOTA su expo-auth-session v5 (SDK 51): l'opzione `useProxy` e il proxy
-// auth.expo.io sono stati rimossi/dismessi da Expo. Il flusso usa quindi il
-// redirect a scheme nativo (sentinella://) con il client ID Android — lo
-// stesso che il provider usa per il refresh, così i token restano coerenti.
+// Sicurezza: NESSUN client secret. La libreria usa il WEB client ID per il
+// login Android (richiesto dall'API Google), ma il flusso resta nativo e
+// senza secret; il client Android è registrato in console via package+SHA-1.
 import Constants from 'expo-constants';
-import { makeRedirectUri } from 'expo-auth-session';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { GoogleDriveProvider } from './storage/googleDrive';
 import { setActiveProvider, clearActiveProvider } from './storage';
 
-// Istanza unica: il provider tiene i token in memoria dopo loadSavedTokens().
+// drive.file = accesso solo ai file creati dall'app (minimo privilegio).
+const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+let configured = false;
+function ensureConfigured(): void {
+  if (configured) return;
+  const webClientId = Constants.expoConfig?.extra?.googleDriveClientIdWeb as string | undefined;
+  if (!webClientId) {
+    throw new Error('[driveAuth] googleDriveClientIdWeb mancante in app.json extra.');
+  }
+  GoogleSignin.configure({
+    webClientId,               // SÌ, il WEB client ID anche per il login Android
+    scopes: [SCOPE],
+    offlineAccess: true,       // necessario per il refresh token
+  });
+  configured = true;
+}
+
+// Istanza unica del provider, alimentata dalla token-source qui sotto.
 let _provider: GoogleDriveProvider | null = null;
 function getProvider(): GoogleDriveProvider {
-  if (!_provider) _provider = new GoogleDriveProvider(); // throw se client ID mancante in extra
+  if (!_provider) _provider = new GoogleDriveProvider(getDriveAccessToken);
   return _provider;
 }
 
 // In modalità test (storageProvider: 'devblob') il provider attivo resta
-// DevBlob: il login salva comunque i token, ma non scavalca il flag di test.
+// DevBlob: il login salva comunque la sessione, ma non scavalca il flag di test.
 function storageConfig(): string {
   return (Constants.expoConfig?.extra?.storageProvider as string) ?? (__DEV__ ? 'devblob' : 'none');
 }
 
-/** Avvia il flusso OAuth (da un tap utente). Salva i token e attiva il provider. */
-export async function loginToDrive(): Promise<void> {
-  const provider = getProvider();
-  // Stesso calcolo fatto da provider.authorize(): loggato per verificarlo
-  // contro gli URI autorizzati nella console Google al primo test.
-  const redirectUri = makeRedirectUri({ scheme: 'sentinella' });
-  console.log('[driveAuth] redirectUri =', redirectUri);
-  await provider.authorize(); // PKCE → access + refresh + scadenza in SecureStore
-  if (storageConfig() !== 'devblob') setActiveProvider(provider);
+/**
+ * Token-source per il GoogleDriveProvider: GoogleSignin.getTokens() rinnova
+ * automaticamente l'access token se scaduto (refresh nativo — la vecchia
+ * logica di refresh manuale del provider non serve più).
+ */
+export async function getDriveAccessToken(): Promise<string> {
+  ensureConfigured();
+  const { accessToken } = await GoogleSignin.getTokens();
+  return accessToken;
 }
 
-/** true se ci sono token salvati (e li carica in memoria nel provider). */
+/** Avvia il login nativo (da un tap utente) e attiva il provider. */
+export async function loginToDrive(): Promise<void> {
+  ensureConfigured();
+  await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+  await GoogleSignin.signIn();
+  await GoogleSignin.getTokens(); // verifica subito che l'access token arrivi
+  if (storageConfig() !== 'devblob') setActiveProvider(getProvider());
+}
+
+/** true se c'è una sessione Google valida (ripristinata in silenzio se serve). */
 export async function isDriveConnected(): Promise<boolean> {
   try {
-    return await getProvider().loadSavedTokens();
+    ensureConfigured();
+    if (GoogleSignin.getCurrentUser() !== null) return true;
+    if (!GoogleSignin.hasPreviousSignIn()) return false;
+    await GoogleSignin.signInSilently();
+    return true;
   } catch {
-    return false; // client ID mancante (es. piattaforma non configurata)
+    return false;
   }
 }
 
-/** All'avvio: se Drive era già connesso, riattiva il provider coi token salvati. */
+/** All'avvio: se Drive era già connesso, riattiva il provider. */
 export async function connectDriveIfSaved(): Promise<boolean> {
   if (!(await isDriveConnected())) return false;
   if (storageConfig() !== 'devblob') setActiveProvider(getProvider());
   return true;
 }
 
-/** Cancella i token e disattiva il provider. */
+/** Scollega l'account Google e disattiva il provider. */
 export async function disconnectDrive(): Promise<void> {
-  await getProvider().clearTokens();
+  ensureConfigured();
+  try { await GoogleSignin.signOut(); } catch { /* già disconnesso */ }
   if (storageConfig() !== 'devblob') clearActiveProvider();
 }

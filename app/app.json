@@ -16,6 +16,7 @@
         }
       ],
       "expo-notifications",
+      "@react-native-google-signin/google-signin",
       "./plugins/withNetworkSecurityConfig"
     ],
     "ios": {
