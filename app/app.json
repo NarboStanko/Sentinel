@@ -39,8 +39,8 @@
       "eas": {
         "projectId": "dbeff2e7-7c92-4f90-bc87-7280d28c2ab7"
       },
-      "googleDriveClientIdIos":     "PLACEHOLDER_IOS.apps.googleusercontent.com",
-      "googleDriveClientIdAndroid": "PLACEHOLDER_ANDROID.apps.googleusercontent.com"
+      "googleDriveClientIdAndroid": "765304695634-qpp4thqdr78amlofiv1kp3ngvpsq7ohs.apps.googleusercontent.com",
+      "googleDriveClientIdWeb":     "765304695634-idimoubp0dskr0ev2cng4jg4vapafsm8.apps.googleusercontent.com"
     },
     "owner": "narbo"
   }

@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { loadOwnerId, loadSwitchId } from '../lib/keystore';
 import { formatDuration } from '../lib/timing';
 import { isFacadeActive, FACADE_SWITCH } from '../lib/facadeStore';
+import { loginToDrive, isDriveConnected, disconnectDrive } from '../lib/driveAuth';
 
 const STATE_LABEL: Record<string, { label: string; tone: 'safe' | 'heartbeat' | 'danger' | 'neutral' }> = {
   ACTIVE: { label: 'ARMATO', tone: 'safe' },
@@ -20,6 +21,7 @@ export default function Home() {
   const [sw, setSw] = useState<any>(null);
   const [switchId, setSwitchId] = useState<string | null>(null);
   const [remaining, setRemaining] = useState<number>(0);
+  const [driveConnected, setDriveConnected] = useState<boolean | null>(null);
 
   const refresh = useCallback(async () => {
     // Modalità facciata: dati fittizi locali, nessuna chiamata al server.
@@ -32,6 +34,32 @@ export default function Home() {
     setSwitchId(id);
     if (id) { const r = await api.getSwitch(id); setSw(r.switch); }
   }, []);
+
+  useEffect(() => { isDriveConnected().then(setDriveConnected); }, []);
+
+  async function connectDrive() {
+    try {
+      await loginToDrive();
+      setDriveConnected(true);
+      Alert.alert('Google Drive connesso', 'I tuoi pacchetti cifrati verranno caricati sul tuo Drive.');
+    } catch (e: any) {
+      alert('Connessione a Drive non riuscita: ' + (e?.message ?? 'Errore sconosciuto'));
+    }
+  }
+
+  function confirmDisconnectDrive() {
+    Alert.alert(
+      'Disconnettere Google Drive?',
+      'I token di accesso verranno rimossi da questo dispositivo. I file già caricati restano sul tuo Drive.',
+      [
+        { text: 'Annulla', style: 'cancel' },
+        {
+          text: 'Disconnetti', style: 'destructive',
+          onPress: async () => { await disconnectDrive(); setDriveConnected(false); },
+        },
+      ],
+    );
+  }
 
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
   useEffect(() => {
@@ -110,6 +138,12 @@ export default function Home() {
         <Button label="PIN di emergenza" onPress={() => router.push('/duress-setup')} variant="ghost" />
         <Button label="Recovery" onPress={() => router.push('/social-recovery')} variant="ghost" />
         <Button label="Strumenti di verifica" onPress={() => router.push('/audit-tools')} variant="ghost" />
+        {driveConnected === false && (
+          <Button label="Connetti Google Drive" onPress={connectDrive} variant="ghost" />
+        )}
+        {driveConnected === true && (
+          <Button label="Google Drive connesso — disconnetti" onPress={confirmDisconnectDrive} variant="ghost" />
+        )}
         {sw?.state === 'ACTIVE' && (
           <Button label="Aggiungi al pacchetto" onPress={() => router.push({ pathname: '/compose', params: { mode: 'add' } })} variant="ghost" />
         )}

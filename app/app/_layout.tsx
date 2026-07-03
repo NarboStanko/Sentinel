@@ -9,17 +9,20 @@ import { setupNotificationChannel, registerPushToken } from '../lib/notification
 import { loadOwnerId, loadIdentity } from '../lib/keystore';
 import { setActiveProvider } from '../lib/storage';
 import { DevBlobProvider } from '../lib/storage/devBlob';
+import { connectDriveIfSaved } from '../lib/driveAuth';
 import { isUnlocked, setUnlocked, setPendingRoute, noteBackground, shouldRelock } from '../lib/lockState';
 
 // Provider di storage inizializzato a livello di modulo (prima di qualsiasi render).
 // Scelto da extra.storageProvider in app.json: 'devblob' attiva DevBlobProvider
 // (test, anche in build release); assente → 'devblob' solo in __DEV__, 'none' altrove.
-// 'none': nessun provider di default — GoogleDriveProvider verrà attivato dopo
-// l'OAuth (chiama setActiveProvider(new GoogleDriveProvider()) dopo
-// provider.authorize() nella schermata di configurazione storage).
+// Con 'none': se Google Drive è già stato connesso (token in SecureStore),
+// riattiva GoogleDriveProvider; altrimenti nessun provider finché l'utente
+// non connette Drive dalla home.
 const storageProviderName = (Constants.expoConfig?.extra?.storageProvider as string) ?? (__DEV__ ? 'devblob' : 'none');
 if (storageProviderName === 'devblob') {
   setActiveProvider(new DevBlobProvider());
+} else {
+  connectDriveIfSaved().catch(() => {});
 }
 
 // Handler globale: mostra la notifica anche se l'app è in foreground.

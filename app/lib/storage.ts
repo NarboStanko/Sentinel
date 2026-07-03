@@ -20,6 +20,10 @@ export function setActiveProvider(p: StorageProvider): void {
   _active = p;
 }
 
+export function clearActiveProvider(): void {
+  _active = null;
+}
+
 export function getActiveProvider(): StorageProvider {
   if (!_active) {
     throw new Error(
