@@ -47,7 +47,28 @@ export default function Home() {
     }
   }
 
-  function confirmDisconnectDrive() {
+  async function confirmDisconnectDrive() {
+    // Guardia: con uno switch armato che usa Drive, la disconnessione
+    // lascerebbe i contatti senza accesso al pacchetto. Fail-safe: se lo
+    // stato non è verificabile (rete), si blocca comunque.
+    const ARMED_STATES = ['ACTIVE', 'GRACE', 'APPROVAL_PENDING'];
+    try {
+      const id = await loadSwitchId();
+      if (id) {
+        const { switch: s } = await api.getSwitch(id);
+        if (s && ARMED_STATES.includes(s.state)) {
+          Alert.alert(
+            'Switch attivo',
+            'Hai 1 switch attivo che usa Google Drive. Disarmalo prima di disconnettere, ' +
+            'altrimenti i tuoi contatti non potranno accedere al pacchetto.',
+          );
+          return;
+        }
+      }
+    } catch {
+      Alert.alert('Verifica non riuscita', 'Impossibile verificare lo stato degli switch. Riprova.');
+      return;
+    }
     Alert.alert(
       'Disconnettere Google Drive?',
       'I token di accesso verranno rimossi da questo dispositivo. I file già caricati restano sul tuo Drive.',

@@ -24,6 +24,11 @@ export function clearActiveProvider(): void {
   _active = null;
 }
 
+/** true se c'è un provider attivo (guardia pre-armo: senza storage non si arma). */
+export function isStorageReady(): boolean {
+  return _active !== null;
+}
+
 export function getActiveProvider(): StorageProvider {
   if (!_active) {
     throw new Error(

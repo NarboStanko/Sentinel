@@ -13,12 +13,12 @@ import { connectDriveIfSaved } from '../lib/driveAuth';
 import { isUnlocked, setUnlocked, setPendingRoute, noteBackground, shouldRelock } from '../lib/lockState';
 
 // Provider di storage inizializzato a livello di modulo (prima di qualsiasi render).
-// Scelto da extra.storageProvider in app.json: 'devblob' attiva DevBlobProvider
-// (test, anche in build release); assente → 'devblob' solo in __DEV__, 'none' altrove.
-// Con 'none': se Google Drive è già stato connesso (token in SecureStore),
-// riattiva GoogleDriveProvider; altrimenti nessun provider finché l'utente
-// non connette Drive dalla home.
-const storageProviderName = (Constants.expoConfig?.extra?.storageProvider as string) ?? (__DEV__ ? 'devblob' : 'none');
+// Regole di selezione (extra.storageProvider in app.json):
+//   'devblob' → DevBlobProvider (override esplicito di sviluppo/test)
+//   'auto' o assente (release) → Google Drive se connesso, altrimenti NESSUN
+//     provider: l'app non crasha, ma l'armo è bloccato finché l'utente non
+//     connette Drive (guardia in compose.tsx).
+const storageProviderName = (Constants.expoConfig?.extra?.storageProvider as string) ?? 'auto';
 if (storageProviderName === 'devblob') {
   setActiveProvider(new DevBlobProvider());
 } else {

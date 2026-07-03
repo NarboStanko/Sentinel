@@ -12,6 +12,8 @@ import {
 } from '../lib/keystore';
 import { encryptWithKey, decryptContent, splitSecret, sealShare, makeDecoy, hexToBytes, bytesToHex, randomBytes } from '../lib/crypto';
 import { uploadEncrypted, downloadEncrypted, deleteEncrypted } from '../lib/drive';
+import { isStorageReady } from '../lib/storage';
+import { loginToDrive } from '../lib/driveAuth';
 import { toSeconds, formatDuration, INTERVAL_PRESETS, PROD_LIMITS, DEV_LIMITS, type TimeUnit, type Preset } from '../lib/timing';
 import { encryptAndUpload, type PendingAttachment, type AttachmentMeta, MAX_FILE_BYTES, MAX_TOTAL_BYTES } from '../lib/attachments';
 import * as DocumentPicker from 'expo-document-picker';
@@ -243,6 +245,30 @@ export default function Compose() {
           : null;
 
   async function armSwitch() {
+    // Guardia storage: senza un provider attivo il pacchetto non ha dove
+    // vivere — blocca l'armo e guida alla connessione di Google Drive.
+    // In modalità 'devblob' non scatta mai (DevBlob è sempre pronto).
+    if (!isStorageReady()) {
+      Alert.alert(
+        'Archiviazione non connessa',
+        'Per armare uno switch devi prima connettere uno spazio di archiviazione.',
+        [
+          { text: 'Annulla', style: 'cancel' },
+          {
+            text: 'Connetti Google Drive',
+            onPress: async () => {
+              try {
+                await loginToDrive();
+                Alert.alert('Google Drive connesso', 'Ora puoi armare lo switch.');
+              } catch (e: any) {
+                alert('Connessione a Drive non riuscita: ' + (e?.message ?? 'Errore sconosciuto'));
+              }
+            },
+          },
+        ],
+      );
+      return;
+    }
     const ownerId = await loadOwnerId();
     if (!ownerId) return;
     if (kError)    { alert(kError);    return; }

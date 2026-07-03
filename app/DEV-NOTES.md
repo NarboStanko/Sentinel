@@ -17,12 +17,14 @@ qualsiasi host, violando i requisiti di sicurezza del progetto.
 
 ## Storage provider (extra.storageProvider)
 
-`storageProvider: 'devblob'` in `extra` (app.json) è per i test: attiva
-`DevBlobProvider` anche nelle build release. In produzione rimuoverlo o
-impostare `'none'` e attivare GoogleDrive via OAuth.
+Regole di selezione (vedi `app/_layout.tsx`):
+- `'devblob'` → DevBlobProvider (override esplicito di sviluppo/test).
+- `'auto'` o assente → Google Drive se connesso (login google-signin),
+  altrimenti nessun provider: l'armo è bloccato con invito a connettere
+  Drive (guardia in `compose.tsx`).
 
-Se la chiave è assente, il default è `'devblob'` in `__DEV__` e `'none'` altrove
-(vedi `app/_layout.tsx`).
+Per test locale rapido con DevBlob, rimettere `storageProvider: 'devblob'`;
+in produzione lasciare `'auto'`.
 
 ## Limiti tempi abbassati per test (compose.tsx)
 
