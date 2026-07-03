@@ -1,5 +1,6 @@
 import 'react-native-get-random-values';
 import { useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 import { Stack, router } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
@@ -8,6 +9,7 @@ import { setupNotificationChannel, registerPushToken } from '../lib/notification
 import { loadOwnerId, loadIdentity } from '../lib/keystore';
 import { setActiveProvider } from '../lib/storage';
 import { DevBlobProvider } from '../lib/storage/devBlob';
+import { isUnlocked, setUnlocked, setPendingRoute, noteBackground, shouldRelock } from '../lib/lockState';
 
 // Provider di storage inizializzato a livello di modulo (prima di qualsiasi render).
 // Scelto da extra.storageProvider in app.json: 'devblob' attiva DevBlobProvider
@@ -32,14 +34,20 @@ Notifications.setNotificationHandler({
 
 // Routing puro: usa solo data.type, mai identificatori sensibili dal payload.
 // Lo state reale (quale switch) viene risolto da /pending su TLS.
+// Se l'app è bloccata, la destinazione viene parcheggiata e si passa dalla
+// lock screen: sarà lei a riprenderla dopo lo sblocco.
 function routeFromData(data: Record<string, unknown>) {
-  if (data.type === 'checkin') {
-    router.push('/home');
-  } else if (data.type === 'approval') {
-    router.push('/approve');
-  } else if (data.type === 'recovery') {
-    router.push('/social-recovery');
+  const dest =
+    data.type === 'checkin'  ? '/home' :
+    data.type === 'approval' ? '/approve' :
+    data.type === 'recovery' ? '/social-recovery' : null;
+  if (!dest) return;
+  if (!isUnlocked()) {
+    setPendingRoute(dest);
+    router.replace('/lock');
+    return;
   }
+  router.push(dest as any);
 }
 
 export default function Layout() {
@@ -76,9 +84,21 @@ export default function Layout() {
       );
     }
 
+    // 5. Riblocco dopo background prolungato (> LOCK_TIMEOUT_MS): al ritorno
+    // in foreground l'app richiede di nuovo il PIN. Sotto soglia resta sbloccata.
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'background') {
+        noteBackground();
+      } else if (state === 'active' && shouldRelock()) {
+        setUnlocked(false);
+        router.replace('/lock');
+      }
+    });
+
     return () => {
       responseListenerRef.current?.remove();
       responseListenerRef.current = null;
+      appStateSub.remove();
     };
   }, []);
 
@@ -91,6 +111,7 @@ export default function Layout() {
       contentStyle: { backgroundColor: colors.bg },
     }}>
       <Stack.Screen name="index"           options={{ headerShown: false }} />
+      <Stack.Screen name="lock"            options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="home"            options={{ headerShown: false }} />
       <Stack.Screen name="contacts"        options={{ title: 'Contatti fidati' }} />
       <Stack.Screen name="add-friend"      options={{ title: 'Aggiungi amico' }} />

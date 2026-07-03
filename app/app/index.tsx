@@ -8,6 +8,7 @@ import { newSeedPhrase, identityFromSeed, bytesToHex } from '../lib/crypto';
 import { saveSeed, loadIdentity, loadOwnerId, saveOwnerId } from '../lib/keystore';
 import { api } from '../lib/api';
 import { registerPushToken } from '../lib/notifications';
+import { isUnlocked, setUnlocked } from '../lib/lockState';
 
 export default function Onboarding() {
   const [seed, setSeed] = useState<string | null>(null);
@@ -19,7 +20,8 @@ export default function Onboarding() {
     (async () => {
       const id = await loadIdentity();
       const ownerId = await loadOwnerId();
-      if (id && ownerId) router.replace('/home');
+      // Identità presente: si passa dalla lock screen (cold start = bloccata).
+      if (id && ownerId) router.replace(isUnlocked() ? '/home' : '/lock');
     })();
   }, []);
 
@@ -50,6 +52,9 @@ export default function Onboarding() {
       // «Tutto ok?» fino al riavvio successivo dell'app (il _layout la chiama
       // solo se ownerId era già presente all'avvio).
       registerPushToken('owner', ownerId).catch(() => {});
+      // Identità appena creata dall'utente: sessione sbloccata. Il PIN di
+      // sblocco verrà richiesto (e creato) al prossimo cold start dalla lock screen.
+      setUnlocked(true);
       router.replace('/home');
     } catch (e: any) {
       console.error('[onboarding]', e);

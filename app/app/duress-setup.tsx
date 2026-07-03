@@ -7,6 +7,7 @@ import { colors, space, radius } from '../theme';
 import { randomBytes } from '../lib/crypto';
 import { bytesToHex } from '@noble/hashes/utils';
 import { hashPin } from '../lib/pinHash';
+import { validatePinFormat } from '../lib/pinPolicy';
 import {
   loadBackupPin, loadDuressPin, saveDuressPin, deleteDuressPin,
   type DuressMode,
@@ -15,27 +16,15 @@ import { api } from '../lib/api';
 
 type Step = 'auth-pin' | 'auth-biometric' | 'status' | 'choose-mode' | 'set-pin' | 'confirm-trigger' | 'delete-confirm';
 
-// PIN deboli comunemente usati: vietati per il PIN di coercizione (≥ 6 cifre).
-// 28 pattern: ripetizioni, sequenze, tastiera numerica, palindrome, alternanze.
-const BLACKLIST = [
-  '000000', '111111', '222222', '333333', '444444', '555555',
-  '666666', '777777', '888888', '999999',
-  '123456', '654321', '234567', '987654',
-  '112233', '123123', '121212', '000001',
-  '012345', '098765', '159753', '147258',
-  '369852', '123321', '131313', '232323',
-  '202020', '808080',
-];
-
 const CONFIRM_TRIGGER_PHRASE = 'HO CAPITO';
 
 async function validateDuressPin(
   pin: string,
   backupPin: { hashHex: string; saltHex: string } | null,
 ): Promise<string | null> {
-  if (!/^\d+$/.test(pin)) return 'Il PIN deve contenere solo cifre.';
-  if (pin.length < 6) return 'Il PIN di emergenza deve essere di almeno 6 cifre.';
-  if (BLACKLIST.includes(pin)) return 'PIN troppo comune. Scegli una sequenza meno prevedibile.';
+  // Requisiti di formato condivisi (cifre, ≥6, blacklist) da pinPolicy.
+  const formatErr = validatePinFormat(pin);
+  if (formatErr) return formatErr;
   if (backupPin) {
     const backupHash = hashPin(backupPin.saltHex, pin);
     if (backupHash === backupPin.hashHex) {

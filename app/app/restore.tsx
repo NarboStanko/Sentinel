@@ -6,6 +6,7 @@ import { colors, space } from '../theme';
 import { isValidSeedPhrase, identityFromSeed, bytesToHex, signChallenge } from '../lib/crypto';
 import { saveSeed, saveOwnerId, saveSwitchId, saveAuthToken } from '../lib/keystore';
 import { api } from '../lib/api';
+import { setUnlocked } from '../lib/lockState';
 
 type Step = 'input' | 'warning';
 
@@ -45,6 +46,9 @@ export default function Restore() {
       await saveOwnerId(result.ownerId);
       await saveAuthToken(result.token);
       setSessionToken(result.token);
+      // L'utente si è appena autenticato con la seed: sessione sbloccata
+      // (copre tutte le uscite verso /home: diretta, disarma, lascia armato).
+      setUnlocked(true);
 
       // Cerca lo switch attivo
       const switches: any[] = result.switches ?? [];
