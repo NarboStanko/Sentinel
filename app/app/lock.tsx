@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Text, TextInput } from 'react-native';
+import { Text, TextInput, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { Screen, Card, Button, T } from '../components/ui';
 import { colors, space, radius } from '../theme';
@@ -10,6 +10,8 @@ import { validatePinFormat, PIN_MIN_LENGTH } from '../lib/pinPolicy';
 import { loadBackupPin, saveBackupPin, loadDuressPin } from '../lib/keystore';
 import { checkLockout, recordFailure, resetLockout, formatLockoutMs } from '../lib/lockout';
 import { setUnlocked, consumePendingRoute } from '../lib/lockState';
+import { activateFacade, deactivateFacade, isFacadeActive, getFacadeActivatedAt } from '../lib/facadeStore';
+import { api } from '../lib/api';
 
 // Lock screen: unico gate di accesso all'app.
 // SOLO PIN, niente biometria (il dito è coercibile). Nessun riferimento a
@@ -63,20 +65,57 @@ export default function Lock() {
   }
 
   // ── Sblocco ─────────────────────────────────────────────────────────────────
+  // Ordine di confronto: PRIMA il duress PIN (in caso di ambiguità vince la
+  // sicurezza), poi il backup PIN. Entrambi i percorsi sono indistinguibili
+  // dall'esterno: stesso azzeramento lockout, stessa navigazione, nessun
+  // messaggio/ritardo differenziale.
   async function handleUnlock() {
     setError(null);
     const { locked, remainingMs } = await checkLockout();
     if (locked) { setLockedUntil(Date.now() + remainingMs); setPin(''); return; }
     if (!backupPin) return;
 
-    const hash = hashPin(backupPin.saltHex, pin);
-    if (hash === backupPin.hashHex) {
+    // 1) Duress PIN
+    const duress = await loadDuressPin();
+    if (duress && hashPin(duress.saltHex, pin) === duress.hashHex) {
       setPin('');
+      // Un PIN duress è un PIN valido: azzera il lockout come uno sblocco normale.
       await resetLockout();
+      if (duress.mode === 'facade') {
+        // Modalità A: facciata locale, il server non riceve nulla.
+        await activateFacade();
+      } else {
+        // Modalità B: trigger silenzioso in background. Un fallimento non deve
+        // bloccare né produrre segnali visibili; si mostrano i dati reali.
+        api.duressTrigger().catch(() => {});
+      }
       goInside();
       return;
     }
 
+    // 2) Backup PIN (sblocco normale)
+    const hash = hashPin(backupPin.saltHex, pin);
+    if (hash === backupPin.hashHex) {
+      setPin('');
+      await resetLockout();
+      // Uscita dalla facciata: lo sblocco col PIN normale la disattiva,
+      // registra l'evento in catena e informa l'utente (ora al sicuro).
+      if (await isFacadeActive()) {
+        const activatedAt = await getFacadeActivatedAt();
+        await deactivateFacade();
+        api.auditAnchorEvent('DURESS_FACADE_TRIGGERED', { activatedAt }).catch(() => {});
+        Alert.alert(
+          'PIN di emergenza usato',
+          activatedAt
+            ? `Hai usato il PIN di emergenza alle ${new Date(activatedAt).toLocaleString('it-IT')}. La modalità facciata è ora disattivata.`
+            : 'Hai usato il PIN di emergenza. La modalità facciata è ora disattivata.',
+        );
+      }
+      goInside();
+      return;
+    }
+
+    // 3) Nessun match
     setPin('');
     const res = await recordFailure();
     if (res.locked) setLockedUntil(res.lockedUntil);

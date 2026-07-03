@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 import { signChallenge, bytesToHex } from './crypto';
 import { loadIdentity } from './keystore';
 import { canonicalize } from './canonicalize';
+import { isFacadeActive } from './facadeStore';
 
 export { canonicalize } from './canonicalize';
 
@@ -20,6 +21,11 @@ export class ApiError extends Error {
 }
 
 async function req<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  // Modalità facciata (duress A): nessuna chiamata raggiunge il server reale.
+  // L'errore imita un problema di rete: generico e plausibile, mai tecnico.
+  if (await isFacadeActive()) {
+    throw new ApiError(0, 'Connessione non disponibile');
+  }
   const res = await fetch(BASE + path, {
     method,
     headers: { 'content-type': 'application/json' },

@@ -6,24 +6,37 @@ import * as SecureStore from 'expo-secure-store';
 
 const FACADE_KEY = 'sentinella.facade_active';
 
-// Cache in memoria per la sessione corrente (evita letture ripetute da SecureStore)
-let cache: boolean | null = null;
+// Cache in memoria per la sessione corrente (evita letture ripetute da SecureStore).
+// Il valore persistito è il timestamp ms di attivazione (serve per l'avviso
+// «Hai usato il PIN di emergenza alle X» all'uscita dalla facciata).
+let cache: number | null | undefined; // undefined = non ancora letto
 
 export async function activateFacade(): Promise<void> {
-  cache = true;
-  await SecureStore.setItemAsync(FACADE_KEY, '1');
+  const now = Date.now();
+  cache = now;
+  await SecureStore.setItemAsync(FACADE_KEY, String(now));
 }
 
 export async function deactivateFacade(): Promise<void> {
-  cache = false;
+  cache = null;
   await SecureStore.deleteItemAsync(FACADE_KEY);
 }
 
-export async function isFacadeActive(): Promise<boolean> {
-  if (cache !== null) return cache;
+async function readActivatedAt(): Promise<number | null> {
+  if (cache !== undefined) return cache;
   const val = await SecureStore.getItemAsync(FACADE_KEY);
-  cache = val === '1';
+  // '1' = formato legacy (senza timestamp): facciata attiva, orario ignoto.
+  cache = val === null ? null : val === '1' ? 0 : Number(val);
   return cache;
+}
+
+export async function isFacadeActive(): Promise<boolean> {
+  return (await readActivatedAt()) !== null;
+}
+
+export async function getFacadeActivatedAt(): Promise<number | null> {
+  const at = await readActivatedAt();
+  return at === 0 ? null : at; // legacy: attiva ma orario sconosciuto
 }
 
 // Dati fittizi mostrati in modalità facciata.
@@ -37,7 +50,23 @@ export const FACADE_SWITCH = {
   next_check_at: null as number | null,
 };
 
+// I campi rispecchiano quelli che contacts.tsx renderizza per i contatti reali
+// (public_key/to_hash/created_at): chiavi esadecimali plausibili ma fittizie.
 export const FACADE_CONTACTS = [
-  { id: 'c_facade_001', display_name: 'Marco R.', pairedAt: Date.now() - 7 * 86400_000 },
-  { id: 'c_facade_002', display_name: 'Elena V.', pairedAt: Date.now() - 14 * 86400_000 },
+  {
+    id: 'c_facade_001',
+    display_name: 'Marco R.',
+    public_key: '02a4c1f08b3d5e7291c6b0d84f13a75e920cd8461b3f5a09e7d2c48b160f3a9d51',
+    to_hash: 'a7e2c91b4d60',
+    created_at: Date.now() - 7 * 86400_000,
+    pairedAt: Date.now() - 7 * 86400_000,
+  },
+  {
+    id: 'c_facade_002',
+    display_name: 'Elena V.',
+    public_key: '03d97b2e51c48a06f3e1b9d270c5a84e6f02d3b18c47e9a05b6d1f28c93e470ab2',
+    to_hash: '3f81d5a2c96e',
+    created_at: Date.now() - 14 * 86400_000,
+    pairedAt: Date.now() - 14 * 86400_000,
+  },
 ];

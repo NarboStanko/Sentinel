@@ -6,6 +6,7 @@ import { colors, space } from '../theme';
 import { api } from '../lib/api';
 import { loadOwnerId, loadSwitchId } from '../lib/keystore';
 import { formatDuration } from '../lib/timing';
+import { isFacadeActive, FACADE_SWITCH } from '../lib/facadeStore';
 
 const STATE_LABEL: Record<string, { label: string; tone: 'safe' | 'heartbeat' | 'danger' | 'neutral' }> = {
   ACTIVE: { label: 'ARMATO', tone: 'safe' },
@@ -21,6 +22,12 @@ export default function Home() {
   const [remaining, setRemaining] = useState<number>(0);
 
   const refresh = useCallback(async () => {
+    // Modalità facciata: dati fittizi locali, nessuna chiamata al server.
+    if (await isFacadeActive()) {
+      setSwitchId(null);
+      setSw({ ...FACADE_SWITCH });
+      return;
+    }
     const id = await loadSwitchId();
     setSwitchId(id);
     if (id) { const r = await api.getSwitch(id); setSw(r.switch); }

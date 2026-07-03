@@ -10,6 +10,7 @@ import {
   loadMyContactIds, deleteMyContactId, type MyContactEntry,
 } from '../lib/keystore';
 import { bytesToHex, signChallenge } from '../lib/crypto';
+import { isFacadeActive, FACADE_CONTACTS } from '../lib/facadeStore';
 
 export default function Contacts() {
   const [contacts, setContacts]       = useState<any[]>([]);
@@ -21,6 +22,13 @@ export default function Contacts() {
   const scannedRef = useRef(false);
 
   const loadOwnerContacts = useCallback(async () => {
+    // Modalità facciata: contatti fittizi (mostrati come verificati per
+    // credibilità), nessuna chiamata al server.
+    if (await isFacadeActive()) {
+      setContacts(FACADE_CONTACTS);
+      setVerifiedKeys(new Set(FACADE_CONTACTS.map((c) => c.public_key)));
+      return;
+    }
     const ownerId = await loadOwnerId();
     if (!ownerId) return;
     const [{ contacts: cs }, vk] = await Promise.all([
@@ -32,6 +40,8 @@ export default function Contacts() {
   }, []);
 
   const loadMyPairings = useCallback(async () => {
+    // In facciata i pairing reali (dove sono contatto di altri) restano nascosti.
+    if (await isFacadeActive()) { setMyPairings([]); return; }
     setMyPairings(await loadMyContactIds());
   }, []);
 
