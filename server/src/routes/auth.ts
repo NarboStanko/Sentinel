@@ -55,7 +55,7 @@ export async function authRoutes(app: FastifyInstance) {
       const token = nanoid(32);
       sessions.set(token, { ownerId: user.id, exp: Date.now() + 30 * 60_000 });
       const switches = db.prepare(
-        'SELECT id, state, interval_sec, grace_sec, threshold_k, next_check_at FROM switches WHERE owner_id = ?'
+        'SELECT id, state, interval_sec, grace_sec, next_check_at FROM switches WHERE owner_id = ?'
       ).all(user.id);
       return { ok: true, token, ownerId: user.id, switches };
     }
