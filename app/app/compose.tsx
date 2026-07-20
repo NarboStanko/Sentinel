@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { View, Text, TextInput, Pressable, Alert } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Screen, Card, Button, T } from '../components/ui';
@@ -14,6 +14,7 @@ import { encryptWithKey, decryptContent, splitSecret, sealShare, makeDecoy, hexT
 import { uploadEncrypted, downloadEncrypted, deleteEncrypted } from '../lib/drive';
 import { isStorageReady } from '../lib/storage';
 import { loginToDrive } from '../lib/driveAuth';
+import { isFacadeActive, FACADE_CONTACTS } from '../lib/facadeStore';
 import { toSeconds, formatDuration, INTERVAL_PRESETS, PROD_LIMITS, DEV_LIMITS, type TimeUnit, type Preset } from '../lib/timing';
 import { encryptAndUpload, type PendingAttachment, type AttachmentMeta, MAX_FILE_BYTES, MAX_TOTAL_BYTES } from '../lib/attachments';
 import * as DocumentPicker from 'expo-document-picker';
@@ -47,8 +48,21 @@ export default function Compose() {
   const [verifiedKeys, setVerifiedKeys] = useState<Set<string>>(new Set());
 
   const [busy, setBusy] = useState(false);
+  // true durante la modalità facciata: nasconde il pulsante DEV anche su
+  // development build (difesa in profondità — un coercitore non deve vederlo).
+  const [facadeActive, setFacadeActive] = useState(false);
+  useEffect(() => { isFacadeActive().then(setFacadeActive); }, []);
 
   const loadContacts = useCallback(async () => {
+    // Modalità facciata: stessi contatti fittizi della lista "Contatti fidati",
+    // marcati come verificati così k è impostabile e tutto sembra pronto all'uso.
+    // Nessuna chiamata al server.
+    if (await isFacadeActive()) {
+      setContacts(FACADE_CONTACTS);
+      setChosen(new Set(FACADE_CONTACTS.map((c) => c.id)));
+      setVerifiedKeys(new Set(FACADE_CONTACTS.map((c) => c.public_key)));
+      return;
+    }
     const ownerId = await loadOwnerId();
     if (!ownerId) return;
     const [{ contacts: cs }, vk] = await Promise.all([
@@ -245,6 +259,15 @@ export default function Compose() {
           : null;
 
   async function armSwitch() {
+    // Modalità facciata: l'armo fallisce SUBITO con lo stesso errore generico
+    // che produrrebbe il guard di api.ts ("Connessione non disponibile").
+    // Deve stare PRIMA della guardia storage (il cui invito "connetti Google
+    // Drive" sarebbe incoerente/rivelatore) e prima dell'upload allegati
+    // (che toccherebbe lo storage reale durante la coercizione).
+    if (await isFacadeActive()) {
+      alert('Errore durante l\'armo: Connessione non disponibile');
+      return;
+    }
     // Guardia storage: senza un provider attivo il pacchetto non ha dove
     // vivere — blocca l'armo e guida alla connessione di Google Drive.
     // In modalità 'devblob' non scatta mai (DevBlob è sempre pronto).
@@ -403,7 +426,7 @@ export default function Compose() {
                 </Pressable>
               );
             })}
-            {__DEV__ && (
+            {__DEV__ && !facadeActive && (
               <Button label="[DEV] Genera 2 contatti test" variant="ghost" onPress={devSeedContacts} />
             )}
           </Card>
