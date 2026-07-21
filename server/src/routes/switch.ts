@@ -62,14 +62,13 @@ export async function switchRoutes(app: FastifyInstance) {
       contentIv: string;
       label?: string;
       shares: { x: number; blob: string }[];
-      recoveryK?: number;
       pub: string; ts: number; sig: string;
     };
   }>(
     '/switch/arm',
     { preHandler: [requireAuth('owner-of-switch'), validateBody(switchArmSchema)] },
     async (req, reply) => {
-      const { switchId, drivePointer, contentIv, label, shares, recoveryK } = req.body;
+      const { switchId, drivePointer, contentIv, label, shares } = req.body;
       const now = Date.now();
       const sw = db.prepare('SELECT interval_sec FROM switches WHERE id = ?').get(switchId) as
         | { interval_sec: number } | undefined;
@@ -91,11 +90,6 @@ export async function switchRoutes(app: FastifyInstance) {
       ).run(now, now + withJitter(sw.interval_sec) * 1000, now, switchId);
       audit(switchId, 'ARMED');
       try { appendToChain({ chain_owner_id: req.actor!.id, event_type: 'ARMED', actor_id: req.actor!.id, payload: { switchId }, signature: req.body.sig }); } catch (e) { console.error('auditChain ARMED', e); }
-
-      if (typeof recoveryK === 'number' && recoveryK >= 1) {
-        const owner = db.prepare('SELECT owner_id FROM switches WHERE id = ?').get(switchId) as { owner_id: string } | undefined;
-        if (owner) db.prepare('UPDATE users SET recovery_k = ? WHERE id = ?').run(recoveryK, owner.owner_id);
-      }
 
       return { ok: true, contentId };
     }
