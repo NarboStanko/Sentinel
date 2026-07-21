@@ -75,7 +75,7 @@ async function createAndArmSwitch(app: any, priv: Uint8Array, pub: string): Prom
     drivePointer: 'ptr://test',
     contentIv:    'a'.repeat(64),
     label:        'test',
-    shares:       [{ x: 1, blob: 'b'.repeat(64) }],
+    shares:       [{ blob: 'b'.repeat(64) }],
   };
   await app.inject({
     method: 'POST', url: '/switch/arm',

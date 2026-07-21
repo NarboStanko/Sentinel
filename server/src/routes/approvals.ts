@@ -94,15 +94,23 @@ export async function approvalRoutes(app: FastifyInstance) {
       // 3. Traccia il contatore cumulativo (può attivare lockout per le prossime richieste)
       trackCumulativeSubmit(actorId, switchId);
 
-      // 4. Overwrite protection: AND submitted_share IS NULL
-      const info = db.prepare(
-        'UPDATE shares SET submitted_share = ? WHERE switch_id = ? AND x = ? AND submitted_share IS NULL'
-      ).run(JSON.stringify(share), switchId, share.x);
-      if (info.changes === 0) {
+      // 4. Overwrite protection. Il server non conosce gli x delle quote armate
+      //    (solo blob opachi): il dedup confronta l'x della quota in arrivo con
+      //    le quote GIÀ SOTTOMESSE, e la nuova viene agganciata a uno slot libero.
+      const rows = db.prepare(
+        'SELECT id, submitted_share FROM shares WHERE switch_id = ?'
+      ).all(switchId) as { id: string; submitted_share: string | null }[];
+      const duplicate = rows.some(
+        (r) => r.submitted_share !== null && (JSON.parse(r.submitted_share) as { x: number }).x === share.x
+      );
+      const freeSlot = rows.find((r) => r.submitted_share === null);
+      if (duplicate || !freeSlot) {
         audit(switchId, 'SHARE_OVERWRITE_ATTEMPTED');
         if (switchOwner) try { appendToChain({ chain_owner_id: switchOwner.owner_id, event_type: 'SHARE_OVERWRITE_ATTEMPTED', actor_id: actorId, payload: { switchId, x: share.x }, signature: req.body.sig }); } catch (e) { console.error('auditChain SHARE_OVERWRITE_ATTEMPTED', e); }
         return reply.code(409).send({ error: 'share_gia_sottomessa', message: 'Quota già inviata per questo indice.' });
       }
+      db.prepare('UPDATE shares SET submitted_share = ? WHERE id = ? AND submitted_share IS NULL')
+        .run(JSON.stringify(share), freeSlot.id);
       audit(switchId, 'SHARE_SUBMITTED');
       if (switchOwner) try { appendToChain({ chain_owner_id: switchOwner.owner_id, event_type: 'SHARE_SUBMITTED', actor_id: actorId, payload: { switchId, x: share.x }, signature: req.body.sig }); } catch (e) { console.error('auditChain SHARE_SUBMITTED', e); }
       const submitted = db.prepare(

@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS switch_contents (
 CREATE TABLE IF NOT EXISTS shares (
   id TEXT PRIMARY KEY,
   switch_id TEXT NOT NULL,
-  x INTEGER NOT NULL,              -- indice Shamir (anche le esche ne hanno uno)
+  x INTEGER,                       -- legacy, sempre NULL all'arm: l'indice Shamir vive DENTRO il blob cifrato
   blob TEXT NOT NULL,              -- blob opaco (quota reale o esca, identici a vista)
   submitted_share TEXT             -- quota decifrata reinviata dal contatto al rilascio
 );

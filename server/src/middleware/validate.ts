@@ -69,10 +69,11 @@ export const switchArmSchema = z.object({
   drivePointer: z.string().min(1).max(2048),
   contentIv:    z.string().min(1).max(256),
   label:        z.string().max(128).optional(),
+  // Solo blob opachi: un client che invia ancora { x } viene rifiutato (strict),
+  // così l'indice non può trapelare al server nemmeno per errore.
   shares:       z.array(z.object({
-    x:    z.number().int().positive(),
     blob: z.string().min(1),
-  })),
+  }).strict()),
   ...auth,
 }).strict();
 

@@ -317,9 +317,11 @@ export default function Compose() {
       await saveSwitchId(switchId);
       await saveDek(switchId, bytesToHex(dek));
       const shares = splitSecret(dek, recipients.length, threshold);
-      const real = recipients.map((c, i) => ({ x: shares[i].x, blob: sealShare(hexToBytes(c.public_key), shares[i]) }));
+      // L'indice x resta SOLO dentro il blob cifrato (sealShare lo impacchetta nel
+      // primo byte): il server riceve blob opachi, indistinguibili dalle esche.
+      const real = recipients.map((c, i) => ({ blob: sealShare(hexToBytes(c.public_key), shares[i]) }));
       const TOTAL = 8;
-      const decoys = Array.from({ length: Math.max(0, TOTAL - real.length) }, (_, j) => ({ x: 100 + j, blob: makeDecoy(32) }));
+      const decoys = Array.from({ length: Math.max(0, TOTAL - real.length) }, () => ({ blob: makeDecoy(32) }));
       const wire = [...real, ...decoys].sort(() => Math.random() - 0.5);
       const { contentId } = await api.arm({ switchId, drivePointer, contentIv: nonce, label: label || undefined, shares: wire });
       await saveContentPointer(switchId, contentId, drivePointer, nonce);

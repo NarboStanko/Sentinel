@@ -61,7 +61,7 @@ export async function switchRoutes(app: FastifyInstance) {
       drivePointer: string;
       contentIv: string;
       label?: string;
-      shares: { x: number; blob: string }[];
+      shares: { blob: string }[];
       pub: string; ts: number; sig: string;
     };
   }>(
@@ -77,8 +77,9 @@ export async function switchRoutes(app: FastifyInstance) {
       db.prepare('DELETE FROM shares WHERE switch_id = ?').run(switchId);
       db.prepare('DELETE FROM switch_contents WHERE switch_id = ?').run(switchId);
 
-      const ins = db.prepare('INSERT INTO shares (id, switch_id, x, blob) VALUES (?,?,?,?)');
-      for (const sh of shares) ins.run('sh_' + nanoid(8), switchId, sh.x, sh.blob);
+      // Solo blob opachi: nessun indice in chiaro, reali ed esche indistinguibili.
+      const ins = db.prepare('INSERT INTO shares (id, switch_id, blob) VALUES (?,?,?)');
+      for (const sh of shares) ins.run('sh_' + nanoid(8), switchId, sh.blob);
 
       const contentId = 'sc_' + nanoid(10);
       db.prepare(

@@ -299,13 +299,13 @@ await test('14) /switch/create — owner auth valida → 200 con switchId', asyn
 await test('15) /switch/arm — nessun auth → 401', async () => {
   const r = await app.inject({
     method: 'POST', url: '/switch/arm',
-    payload: { switchId: G_DISARMED, drivePointer: 'ptr://x', contentIv: 'iv0', shares: [{ x: 1, blob: 'aa' }] },
+    payload: { switchId: G_DISARMED, drivePointer: 'ptr://x', contentIv: 'iv0', shares: [{ blob: 'aa' }] },
   });
   if (r.statusCode !== 401) throw new Error(`atteso 401, ricevuto ${r.statusCode}`);
 });
 
 await test('16) /switch/arm — owner-of-switch auth valida → 200', async () => {
-  const body = { switchId: G_DISARMED, drivePointer: 'ptr://x', contentIv: 'iv0', shares: [{ x: 1, blob: 'aa' }, { x: 2, blob: 'bb' }] };
+  const body = { switchId: G_DISARMED, drivePointer: 'ptr://x', contentIv: 'iv0', shares: [{ blob: 'aa' }, { blob: 'bb' }] };
   const r = await app.inject({ method: 'POST', url: '/switch/arm', payload: signed(G_PRIV, G_PUB, 'POST', '/switch/arm', body) });
   if (r.statusCode !== 200) throw new Error(`atteso 200, ricevuto ${r.statusCode}: ${r.payload}`);
 });
