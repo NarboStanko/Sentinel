@@ -73,7 +73,6 @@ export const switchArmSchema = z.object({
     x:    z.number().int().positive(),
     blob: z.string().min(1),
   })),
-  recoveryK: z.number().int().positive().max(100).optional(),
   ...auth,
 }).strict();
 
