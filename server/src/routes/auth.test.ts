@@ -406,20 +406,29 @@ await test('30) /push/register — owner auth valida → 200', async () => {
   if (r.statusCode !== 200) throw new Error(`atteso 200, ricevuto ${r.statusCode}: ${r.payload}`);
 });
 
-// ── Test 31: share overwrite → 409 ───────────────────────────────────────────
-await test('31) /approval/submit — seconda submit stesso x → 409 share_gia_sottomessa', async () => {
+// ── Test 31: share overwrite → 409; re-invio identico → idempotente ──────────
+await test('31) /approval/submit — re-invio identico → 200 collected; stesso x con y diversa → 409', async () => {
   // Inserisci una share affinché il primo submit riesca
   db.prepare('INSERT INTO shares (id, switch_id, x, blob) VALUES (?,?,?,?)').run('sh_t1', G_PEND, 99, 'blob_test');
   const body = { switchId: G_PEND, share: { x: 99, y: 'XXXX' } };
   const p1 = signed(GC_PRIV, GC_PUB, 'POST', '/approval/submit', body);
   const r1 = await app.inject({ method: 'POST', url: '/approval/submit', payload: p1 });
   if (r1.statusCode !== 200) throw new Error(`primo submit: atteso 200, ricevuto ${r1.statusCode}: ${r1.payload}`);
-  // Secondo submit con stesso x: deve essere 409
+  // Re-invio IDENTICO (stessa x, stessa y): idempotente, restituisce le raccolte
+  // (serve al contatto che riapre dopo il RELEASED per ricombinare la DEK).
   const p2 = signed(GC_PRIV, GC_PUB, 'POST', '/approval/submit', body);
   const r2 = await app.inject({ method: 'POST', url: '/approval/submit', payload: p2 });
-  if (r2.statusCode !== 409) throw new Error(`secondo submit: atteso 409, ricevuto ${r2.statusCode}: ${r2.payload}`);
+  if (r2.statusCode !== 200) throw new Error(`re-invio identico: atteso 200, ricevuto ${r2.statusCode}: ${r2.payload}`);
   const b2 = JSON.parse(r2.payload);
-  if (b2.error !== 'share_gia_sottomessa') throw new Error(`atteso share_gia_sottomessa, ricevuto ${b2.error}`);
+  if (!Array.isArray(b2.collected) || !b2.collected.some((s: any) => s.x === 99 && s.y === 'XXXX'))
+    throw new Error(`re-invio identico: collected deve contenere la quota (${r2.payload})`);
+  // Stesso x ma y DIVERSA: overwrite negato → 409
+  const body3 = { switchId: G_PEND, share: { x: 99, y: 'YYYY' } };
+  const p3 = signed(GC_PRIV, GC_PUB, 'POST', '/approval/submit', body3);
+  const r3 = await app.inject({ method: 'POST', url: '/approval/submit', payload: p3 });
+  if (r3.statusCode !== 409) throw new Error(`overwrite: atteso 409, ricevuto ${r3.statusCode}: ${r3.payload}`);
+  const b3 = JSON.parse(r3.payload);
+  if (b3.error !== 'share_gia_sottomessa') throw new Error(`atteso share_gia_sottomessa, ricevuto ${b3.error}`);
 });
 
 // ── Riepilogo ──────────────────────────────────────────────────────────────────

@@ -97,9 +97,25 @@ export async function approvalRoutes(app: FastifyInstance) {
       // 4. Overwrite protection. Il server non conosce gli x delle quote armate
       //    (solo blob opachi): il dedup confronta l'x della quota in arrivo con
       //    le quote GIÀ SOTTOMESSE, e la nuova viene agganciata a uno slot libero.
+      //    Re-invio IDENTICO (stessa x e stessa y) → idempotente: restituisce le
+      //    quote raccolte senza modificare nulla. Serve al contatto che aveva già
+      //    approvato in una sessione precedente e riapre dopo il RELEASED: possiede
+      //    già la quota che invia, quindi non ottiene nulla che non abbia dimostrato
+      //    di avere. Una y DIVERSA con x già usata resta un overwrite negato (409).
       const rows = db.prepare(
         'SELECT id, submitted_share FROM shares WHERE switch_id = ?'
       ).all(switchId) as { id: string; submitted_share: string | null }[];
+      const identical = rows.some((r) => {
+        if (r.submitted_share === null) return false;
+        const s = JSON.parse(r.submitted_share) as { x: number; y: string };
+        return s.x === share.x && s.y === share.y;
+      });
+      if (identical) {
+        const already = db.prepare(
+          'SELECT submitted_share FROM shares WHERE switch_id = ? AND submitted_share IS NOT NULL'
+        ).all(switchId) as { submitted_share: string }[];
+        return { collected: already.map((s) => JSON.parse(s.submitted_share)) };
+      }
       const duplicate = rows.some(
         (r) => r.submitted_share !== null && (JSON.parse(r.submitted_share) as { x: number }).x === share.x
       );

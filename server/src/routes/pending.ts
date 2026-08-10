@@ -46,21 +46,26 @@ export async function pendingRoutes(app: FastifyInstance) {
 
     if (!contact) return { switches: [] };
 
-    // 4) restituisce gli switch del suo owner in APPROVAL_PENDING.
+    // 4) restituisce gli switch del suo owner in APPROVAL_PENDING o RELEASED.
     //    Lo scope è owner_id di QUESTO contatto: non restituisce mai
-    //    switch di altri owner anche se sono APPROVAL_PENDING.
+    //    switch di altri owner. I RELEASED sono inclusi (con state esplicito)
+    //    perché un contatto che apre l'app dopo il rilascio deve poter trovare
+    //    lo switch e completare la decifratura in autonomia; i puntatori ai
+    //    contenuti restano comunque dietro il gate RELEASED di /approval/request.
     const rows = db
       .prepare(
-        `SELECT s.id AS switchId, u.display_name AS ownerName
+        `SELECT s.id AS switchId, s.state AS state, u.display_name AS ownerName
          FROM switches s
          JOIN users u ON u.id = s.owner_id
-         WHERE s.owner_id = ? AND s.state = 'APPROVAL_PENDING'`
+         WHERE s.owner_id = ? AND s.state IN ('APPROVAL_PENDING','RELEASED')
+         ORDER BY CASE s.state WHEN 'APPROVAL_PENDING' THEN 0 ELSE 1 END`
       )
-      .all(contact.owner_id) as { switchId: string; ownerName: string | null }[];
+      .all(contact.owner_id) as { switchId: string; state: string; ownerName: string | null }[];
 
     return {
       switches: rows.map((r) => ({
         switchId: r.switchId,
+        state: r.state,
         ownerName: r.ownerName ?? 'Questa persona',
       })),
     };

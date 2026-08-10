@@ -2,7 +2,7 @@ import 'react-native-get-random-values';
 import '../lib/polyfills'; // TextEncoder/TextDecoder per Hermes — prima di ogni modulo che li usa
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
-import { Stack, router } from 'expo-router';
+import { Stack, router, usePathname } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { colors } from '../theme';
@@ -36,27 +36,44 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// Routing puro: usa solo data.type, mai identificatori sensibili dal payload.
-// Lo state reale (quale switch) viene risolto da /pending su TLS.
-// Se l'app è bloccata, la destinazione viene parcheggiata e si passa dalla
-// lock screen: sarà lei a riprenderla dopo lo sblocco.
-function routeFromData(data: Record<string, unknown>) {
-  const dest =
-    data.type === 'checkin'  ? '/home' :
-    data.type === 'approval' ? '/approve' :
-    data.type === 'recovery' ? '/social-recovery' : null;
-  if (!dest) return;
-  if (!isUnlocked()) {
-    setPendingRoute(dest);
-    router.replace('/lock');
-    return;
-  }
-  router.push(dest as any);
-}
-
 export default function Layout() {
   // ref per evitare di registrare il listener più volte (StrictMode / hot reload)
   const responseListenerRef = useRef<Notifications.Subscription | null>(null);
+
+  // Pathname corrente in ref: i listener (notifiche, AppState) sono registrati
+  // una volta sola e non devono catturare un valore stantio.
+  const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
+  useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
+
+  // Naviga verso /lock solo se non ci siamo già: un secondo replace rimonta la
+  // lock screen e cancella il PIN che l'utente sta digitando.
+  function goToLock() {
+    if (pathnameRef.current !== '/lock') router.replace('/lock');
+  }
+
+  // Routing puro: usa solo data.type, mai identificatori sensibili dal payload.
+  // Lo state reale (quale switch) viene risolto da /pending su TLS.
+  // Se l'app è bloccata — O sta per ribloccarsi al rientro in foreground
+  // (shouldRelock) — la destinazione viene parcheggiata e si passa dalla lock
+  // screen, che la riprende dopo lo sblocco. Il controllo shouldRelock è
+  // essenziale: l'ordine tra questo listener e il handler AppState che esegue
+  // il relock non è garantito, e senza controllo il tap sulla notifica faceva
+  // push su /approve, il relock lo sostituiva con /lock, e dopo lo sblocco
+  // l'utente finiva su /home invece che sulla pagina di trasmissione quota.
+  function routeFromData(data: Record<string, unknown>) {
+    const dest =
+      data.type === 'checkin'  ? '/home' :
+      data.type === 'approval' ? '/approve' :
+      data.type === 'recovery' ? '/social-recovery' : null;
+    if (!dest) return;
+    if (!isUnlocked() || shouldRelock()) {
+      setPendingRoute(dest);
+      goToLock();
+      return;
+    }
+    router.push(dest as any);
+  }
 
   useEffect(() => {
     (async () => {
@@ -95,7 +112,10 @@ export default function Layout() {
         noteBackground();
       } else if (state === 'active' && shouldRelock()) {
         setUnlocked(false);
-        router.replace('/lock');
+        // goToLock (non replace diretto): se il listener notifiche ha già
+        // parcheggiato la destinazione e navigato su /lock, un secondo replace
+        // rimonterebbe la schermata azzerando il PIN digitato.
+        goToLock();
       }
     });
 
@@ -121,6 +141,8 @@ export default function Layout() {
       <Stack.Screen name="add-friend"      options={{ title: 'Aggiungi amico' }} />
       <Stack.Screen name="compose"         options={{ title: 'Prepara il pacchetto' }} />
       <Stack.Screen name="approve"         options={{ title: 'Richiesta di rilascio' }} />
+      <Stack.Screen name="received"        options={{ title: 'Pacchetti ricevuti' }} />
+      <Stack.Screen name="received-package" options={{ title: 'Pacchetto ricevuto' }} />
       <Stack.Screen name="restore"         options={{ title: 'Ripristina account' }} />
       <Stack.Screen name="backup"          options={{ title: 'Backup seed' }} />
       <Stack.Screen name="social-recovery"  options={{ title: 'Recovery identità' }} />

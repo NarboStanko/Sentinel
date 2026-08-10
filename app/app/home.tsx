@@ -4,7 +4,8 @@ import { router, useFocusEffect } from 'expo-router';
 import { Screen, Card, Button, Pill, T } from '../components/ui';
 import { colors, space } from '../theme';
 import { api } from '../lib/api';
-import { loadOwnerId, loadSwitchId } from '../lib/keystore';
+import { loadIdentity, loadOwnerId, loadSwitchId } from '../lib/keystore';
+import { signChallenge, bytesToHex } from '../lib/crypto';
 import { formatDuration } from '../lib/timing';
 import { isFacadeActive, FACADE_SWITCH } from '../lib/facadeStore';
 import { loginToDrive, isDriveConnected, disconnectDrive } from '../lib/driveAuth';
@@ -17,22 +18,43 @@ const STATE_LABEL: Record<string, { label: string; tone: 'safe' | 'heartbeat' | 
   DISARMED: { label: 'DISARMATO', tone: 'neutral' },
 };
 
+type PendingEntry = { switchId: string; ownerName: string; state?: string };
+
 export default function Home() {
   const [sw, setSw] = useState<any>(null);
   const [switchId, setSwitchId] = useState<string | null>(null);
   const [remaining, setRemaining] = useState<number>(0);
   const [driveConnected, setDriveConnected] = useState<boolean | null>(null);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingEntry[]>([]);
 
   const refresh = useCallback(async () => {
     // Modalità facciata: dati fittizi locali, nessuna chiamata al server.
     if (await isFacadeActive()) {
       setSwitchId(null);
       setSw({ ...FACADE_SWITCH });
+      setPendingApprovals([]);
       return;
     }
     const id = await loadSwitchId();
     setSwitchId(id);
     if (id) { const r = await api.getSwitch(id); setSw(r.switch); }
+
+    // Approvazioni in sospeso LATO CONTATTO: switch APPROVAL_PENDING o RELEASED
+    // per cui questo dispositivo ha una quota. Così una richiesta resta sempre
+    // ritrovabile anche se la notifica è stata persa o chiusa.
+    // Best-effort: offline si tiene l'ultima lista nota, la home non si rompe.
+    try {
+      const identity = await loadIdentity();
+      if (identity) {
+        const ts = Date.now();
+        const pub = bytesToHex(identity.pub);
+        const sig = signChallenge(identity.priv, 'sentinella:pending:' + pub + ':' + ts);
+        const { switches } = await api.pendingApprovals(pub, ts, sig);
+        setPendingApprovals(switches);
+      }
+    } catch (e) {
+      console.log('[home] lista approvazioni non aggiornata', e);
+    }
   }, []);
 
   useEffect(() => { isDriveConnected().then(setDriveConnected); }, []);
@@ -153,8 +175,37 @@ export default function Home() {
         )}
       </Card>
 
+      {pendingApprovals.length > 0 && (
+        <Card tone="danger">
+          <Text style={T.label}>APPROVAZIONI IN SOSPESO</Text>
+          {pendingApprovals.map((p) => (
+            <View key={p.switchId} style={{ marginTop: space(3), gap: space(2) }}>
+              <Pill
+                label={p.state === 'RELEASED' ? 'RILASCIATO' : 'IN ATTESA DI APPROVAZIONE'}
+                tone="danger"
+              />
+              <Text style={T.body}>
+                {p.ownerName}
+                {p.state === 'RELEASED'
+                  ? ' — il quorum ha rilasciato: apri per decifrare con la tua quota.'
+                  : ' — non risponde da troppo tempo: serve la tua decisione.'}
+              </Text>
+              <Button
+                label="Apri"
+                onPress={() => router.push({
+                  pathname: '/approve',
+                  params: { switchId: p.switchId, ownerName: p.ownerName },
+                })}
+                variant="danger"
+              />
+            </View>
+          ))}
+        </Card>
+      )}
+
       <View style={{ gap: space(3), marginTop: space(2) }}>
         <Button label="Contatti fidati" onPress={() => router.push('/contacts')} variant="ghost" />
+        <Button label="Pacchetti ricevuti" onPress={() => router.push('/received')} variant="ghost" />
         <Button label="Backup seed" onPress={() => router.push('/backup')} variant="ghost" />
         <Button label="PIN di emergenza" onPress={() => router.push('/duress-setup')} variant="ghost" />
         <Button label="Recovery" onPress={() => router.push('/social-recovery')} variant="ghost" />

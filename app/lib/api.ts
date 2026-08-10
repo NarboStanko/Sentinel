@@ -110,10 +110,10 @@ export const api = {
   registerPush: (role: 'owner' | 'contact', id: string, pushToken: string) =>
     signedReq<{ ok: boolean }>('/push/register', 'POST', { role, id, pushToken }),
 
-  // Switch in APPROVAL_PENDING per il contatto autenticato a firma.
+  // Switch in APPROVAL_PENDING o RELEASED per il contatto autenticato a firma.
   // pub: chiave pubblica hex del contatto; ts: timestamp ms; sig: firma compatta P-256.
   pendingApprovals: (pub: string, ts: number, sig: string) =>
-    req<{ switches: { switchId: string; ownerName: string }[] }>(
+    req<{ switches: { switchId: string; ownerName: string; state?: string }[] }>(
       `/pending?pub=${encodeURIComponent(pub)}&ts=${ts}&sig=${encodeURIComponent(sig)}`
     ),
 

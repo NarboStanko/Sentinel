@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import { Text, Image, View } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Text, Image, View, AppState } from 'react-native';
+import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { Screen, Card, Button, Pill, T } from '../components/ui';
 import { colors, space } from '../theme';
 import { api } from '../lib/api';
@@ -11,6 +11,7 @@ import {
 import { loadIdentity, loadVerifiedOwnerKey } from '../lib/keystore';
 import { downloadEncrypted } from '../lib/drive';
 import { decryptAttachment, type AttachmentMeta } from '../lib/attachments';
+import { savePackage } from '../lib/vault';
 
 // Converte Uint8Array in base64 in chunk per evitare stack overflow su file grandi.
 function uint8ToBase64(bytes: Uint8Array): string {
@@ -27,6 +28,10 @@ type ContentItem = { label: string; text: string; attachments: AttachmentMeta[] 
 // Aperta dal CONTATTO alla push (o direttamente).
 // INVARIANTE: non usa mai la chiave owner dal payload push o dal server;
 // usa loadVerifiedOwnerKey() (chiave verificata di persona al pairing).
+//
+// Lo stato viene ri-letto a ogni focus e ritorno in foreground: se nel frattempo
+// il quorum ha rilasciato (RELEASED), il contatto rifà il percorso di decifratura
+// invece di restare su un "in attesa" stantio.
 export default function Approve() {
   const { switchId: paramSwitchId, ownerName: paramOwnerName } =
     useLocalSearchParams<{ switchId?: string; ownerName?: string }>();
@@ -43,41 +48,111 @@ export default function Approve() {
 
   // DEK ricombinata in tryReconstruct; tenuta in ref per i tap sugli allegati.
   const dekRef = useRef<Uint8Array | null>(null);
+  // switchId risolto (param o /pending): ref per evitare closure stantie nei refresh.
+  const switchIdRef = useRef<string | null>(paramSwitchId ?? null);
+  const ownerNameRef = useRef<string>(paramOwnerName ?? 'Questa persona');
+  // true dopo una decifratura riuscita: i refresh successivi non rifanno nulla.
+  const decryptedRef = useRef(false);
+  // evita loadState concorrenti (focus + AppState possono scattare vicini).
+  const inFlightRef = useRef(false);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        let sid = paramSwitchId ?? null;
+  // Ri-legge lo stato dello switch dal server. Se il contatto non ha uno
+  // switchId (aperta dalla push generica), lo risolve via /pending — che ora
+  // include anche gli switch RELEASED, così un contatto che apre l'app dopo il
+  // rilascio trova comunque il pacchetto.
+  const loadState = useCallback(async () => {
+    if (inFlightRef.current || decryptedRef.current) return;
+    inFlightRef.current = true;
+    try {
+      let sid = switchIdRef.current ?? paramSwitchId ?? null;
 
-        if (!sid) {
-          const id = await loadIdentity();
-          if (!id) { setErr('Identità non trovata — configura prima l\'app.'); return; }
-          const ts = Date.now();
-          const pub = bytesToHex(id.pub);
-          const sig = signChallenge(id.priv, 'sentinella:pending:' + pub + ':' + ts);
-          const { switches } = await api.pendingApprovals(bytesToHex(id.pub), ts, sig);
-          if (switches.length === 0) { setLoading(false); return; }
-          sid = switches[0].switchId;
-          setOwnerName(switches[0].ownerName);
-          setSwitchId(sid);
-        }
-
-        setReq(await api.approvalRequest(sid));
-      } catch (e: any) {
-        setErr('Errore nel caricare la richiesta: ' + (e?.message ?? e));
-      } finally {
-        setLoading(false);
+      if (!sid) {
+        const id = await loadIdentity();
+        if (!id) { setErr('Identità non trovata — configura prima l\'app.'); return; }
+        const ts = Date.now();
+        const pub = bytesToHex(id.pub);
+        const sig = signChallenge(id.priv, 'sentinella:pending:' + pub + ':' + ts);
+        const { switches } = await api.pendingApprovals(pub, ts, sig);
+        if (switches.length === 0) return;
+        // Preferisce una richiesta ancora in corso; altrimenti uno switch già rilasciato.
+        const pick = switches.find((s) => s.state !== 'RELEASED') ?? switches[0];
+        sid = pick.switchId;
+        setOwnerName(pick.ownerName);
+        ownerNameRef.current = pick.ownerName;
       }
-    })();
+      switchIdRef.current = sid;
+      setSwitchId(sid);
+
+      const r = await api.approvalRequest(sid);
+      setReq(r);
+      if (r.released) {
+        await accessReleased(sid);
+      }
+    } catch (e: any) {
+      setErr('Errore nel caricare la richiesta: ' + (e?.message ?? e));
+    } finally {
+      inFlightRef.current = false;
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramSwitchId]);
+
+  // Refresh a ogni focus della schermata e a ogni ritorno in foreground.
+  useFocusEffect(useCallback(() => { loadState(); }, [loadState]));
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') loadState(); });
+    return () => sub.remove();
+  }, [loadState]);
+
+  // Accesso autonomo a uno switch già RELEASED: trova la propria quota (trial
+  // decryption), la sottomette (idempotente se già inviata in una sessione
+  // precedente), riceve le raccolte e ricombina la DEK in locale.
+  // Il server continua a non vedere né DEK né plaintext: riceve solo la quota,
+  // come nel flusso di approvazione normale.
+  async function accessReleased(sid: string) {
+    try {
+      const id = await loadIdentity();
+      if (!id) { setErr('Identità non trovata — configura prima l\'app.'); return; }
+      setStatus('Pacchetto rilasciato — recupero delle quote in corso…');
+
+      const { blobs } = await api.shares(sid);
+      const mine = findMyShare(blobs, id.priv);
+      if (!mine) {
+        setStatus('');
+        setErr(
+          'Il pacchetto è stato rilasciato, ma su questo dispositivo non c\'è nessuna quota '
+          + 'intestata a te. Senza contribuire la tua quota il contenuto non è decifrabile.'
+        );
+        return;
+      }
+
+      let collected: { x: number; y: string }[];
+      try {
+        ({ collected } = await api.approvalSubmit(sid, { x: mine.x, y: bytesToHex(mine.y) }));
+      } catch (e: any) {
+        setStatus('');
+        setErr(
+          'Per accedere al contenuto devi contribuire la tua quota, ma l\'invio non è riuscito: '
+          + (e?.message ?? e) + ' — riprova.'
+        );
+        return;
+      }
+
+      const done = await tryReconstruct(collected, sid);
+      if (!done) {
+        setStatus('Rilascio avvenuto, ma le quote raccolte non bastano ancora a decifrare. Riprova più tardi.');
+      }
+    } catch (e: any) {
+      setErr('Errore nell\'accesso al contenuto rilasciato: ' + (e?.message ?? e));
+    }
+  }
 
   // Prova a ricostruire dalle quote raccolte; se decifra, la soglia è raggiunta.
   // L'ordine confirm→download è OBBLIGATO: il server non conosce k, quindi espone
   // i puntatori solo dopo che un client conferma il rilascio (RELEASED).
   // Ritorna false SOLO quando ha senso il messaggio "in attesa di altre approvazioni";
   // gli errori dopo il rilascio vengono mostrati, mai mascherati da attesa.
-  async function tryReconstruct(collected: { x: number; y: string }[]) {
+  async function tryReconstruct(collected: { x: number; y: string }[], sid: string) {
     if (collected.length < 2) return false;
 
     let dek: Uint8Array;
@@ -88,11 +163,11 @@ export default function Approve() {
       return false;
     }
 
-    try { await api.releaseConfirm(switchId!); } catch { /* già RELEASED o rete: fa fede la lettura sotto */ }
+    try { await api.releaseConfirm(sid); } catch { /* già RELEASED o rete: fa fede la lettura sotto */ }
 
     let released: Awaited<ReturnType<typeof api.approvalRequest>>;
     try {
-      released = await api.approvalRequest(switchId!);
+      released = await api.approvalRequest(sid);
     } catch (e) {
       console.error('[approve] stato del rilascio non leggibile (rete?)', e);
       return false; // stato ignoto: l'attesa resta il messaggio meno fuorviante
@@ -124,8 +199,28 @@ export default function Approve() {
       }
 
       dekRef.current = dek;
+      decryptedRef.current = true;
+      setErr(null);
       setContentItems(items);
       setStatus('Soglia raggiunta — documentazione rilasciata');
+
+      // Persistenza cifrata a riposo nel vault locale ("Pacchetti ricevuti"):
+      // best-effort, non deve mai far fallire il flusso di rilascio.
+      try {
+        await savePackage({
+          switchId: sid,
+          ownerName: ownerNameRef.current,
+          savedAt: Date.now(),
+          dekHex: bytesToHex(dek),
+          items: items.map((it) => ({
+            label: it.label,
+            text: it.text,
+            attachments: it.attachments.map((meta) => ({ meta })),
+          })),
+        });
+      } catch (e) {
+        console.log('[approve] salvataggio nel vault non riuscito', e);
+      }
       return true;
     } catch (e) {
       // Decifratura fallita: con k>2 può semplicemente mancare qualche quota
@@ -157,7 +252,7 @@ export default function Approve() {
       switchId,
       { x: mine.x, y: bytesToHex(mine.y) }
     );
-    const done = await tryReconstruct(collected);
+    const done = await tryReconstruct(collected, switchId);
     if (!done) {
       setStatus(`Quota registrata. In attesa di altre approvazioni (raccolte: ${collected.length}).`);
     }
@@ -190,7 +285,7 @@ export default function Approve() {
   return (
     <Screen>
       {err && <Text style={[T.dim, { color: '#C0492F' }]}>{err}</Text>}
-      {!req?.pending && contentItems.length === 0 && !status && !err && (
+      {!req?.pending && !req?.released && contentItems.length === 0 && !status && !err && (
         <Text style={T.dim}>Nessuna richiesta di approvazione in sospeso.</Text>
       )}
       {req?.pending && contentItems.length === 0 && (
@@ -203,6 +298,22 @@ export default function Approve() {
           {!!status && <Text style={T.dim}>{status}</Text>}
           <Button label="Approva e contribuisci la mia quota" onPress={approve} variant="danger" />
           <Button label="Non ora" onPress={() => router.back()} variant="ghost" />
+        </Card>
+      )}
+      {req?.released && contentItems.length === 0 && (
+        <Card tone="danger">
+          <Pill label="PACCHETTO RILASCIATO" tone="danger" />
+          <Text style={[T.body, { marginTop: space(2) }]}>
+            Il quorum ha rilasciato la documentazione di {ownerName}. Per leggerla
+            devi contribuire la tua quota: la decifratura avviene solo sul tuo
+            dispositivo, il server non vede mai il contenuto.
+          </Text>
+          {!!status && <Text style={T.dim}>{status}</Text>}
+          <Button
+            label="Contribuisci la mia quota e decifra"
+            onPress={() => { const sid = switchIdRef.current; if (sid) accessReleased(sid); }}
+            variant="danger"
+          />
         </Card>
       )}
       {contentItems.length > 0 && (
