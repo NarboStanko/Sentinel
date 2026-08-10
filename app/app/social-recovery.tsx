@@ -8,7 +8,7 @@ import { View, Text, TextInput, Pressable } from 'react-native';
 import { Screen, Card, Button, T } from '../components/ui';
 import { colors, space } from '../theme';
 import { identityFromSeed, bytesToHex, signChallenge } from '../lib/crypto';
-import { loadSeed, loadOwnerId, loadIdentity } from '../lib/keystore';
+import { loadSeed, loadIdentity } from '../lib/keystore';
 import { api } from '../lib/api';
 
 type Section = 'initiate' | 'approve' | 'cancel';
@@ -25,21 +25,27 @@ function formatTimeLeft(unlockAt: number): string {
 }
 
 // ── Sezione 1: Avvia recovery (nuova identità sull'attuale device) ──────────
+// Scenario reale: telefono E seed persi, device nuovo con seed NUOVA. L'ownerId
+// del device è quindi il NUOVO account: quello da recuperare è il VECCHIO, e lo
+// comunicano i contatti fidati (lo hanno nella loro lista). Per questo l'id va
+// inserito a mano, non letto con loadOwnerId().
 function InitiateSection() {
   const [busy, setBusy] = useState(false);
+  const [oldOwnerId, setOldOwnerId] = useState('');
   const [result, setResult] = useState<{ recoveryId: string; unlockAt: number } | null>(null);
   const [finalizeResult, setFinalizeResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleInitiate() {
     setError(null);
+    if (!oldOwnerId.trim()) { setError('Inserisci il tuo vecchio ID account.'); return; }
     setBusy(true);
     try {
-      const [seed, ownerId] = await Promise.all([loadSeed(), loadOwnerId()]);
-      if (!seed || !ownerId) { setError('Nessun account trovato su questo dispositivo.'); return; }
+      const seed = await loadSeed();
+      if (!seed) { setError('Nessun account trovato su questo dispositivo.'); return; }
       const identity = identityFromSeed(seed);
       const newPubHex = bytesToHex(identity.pub);
-      const res = await api.recoveryInitiate(ownerId, newPubHex);
+      const res = await api.recoveryInitiate(oldOwnerId.trim(), newPubHex);
       if (!res.ok || !res.recoveryId || !res.unlockAt) {
         setError(res.reason ?? 'Impossibile avviare il recovery.');
         return;
@@ -74,13 +80,33 @@ function InitiateSection() {
     <Card>
       <Text style={T.heading}>Avvia recovery (nuova identità)</Text>
       <Text style={T.dim}>
-        Usa questa sezione se hai perso il telefono e hai accesso alla seed phrase su un nuovo
-        dispositivo. Richiede l'approvazione di un quorum di contatti fidati e un ritardo obbligatorio
-        di 7 giorni.
+        Usa questa sezione solo se hai perso il telefono E la seed phrase, e stai ripartendo da
+        un dispositivo nuovo con una nuova identità. Inserisci il tuo vecchio ID account: te lo
+        comunicano i tuoi contatti fidati (lo trovano nella loro lista contatti). Richiede
+        l'approvazione di un quorum di contatti e un ritardo di 7 giorni.
+      </Text>
+      <Text style={T.dim}>
+        (Se hai ancora la seed, NON serve questa sezione: usa il ripristino da seed normale.)
       </Text>
 
       {!result ? (
         <>
+          <TextInput
+            value={oldOwnerId}
+            onChangeText={setOldOwnerId}
+            placeholder="Il tuo vecchio ID account (es. usr_xxxx)"
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={{
+              borderWidth: 1,
+              borderColor: colors.line,
+              borderRadius: 8,
+              padding: space(3),
+              fontSize: 14,
+              color: colors.ink,
+              fontFamily: 'Courier',
+            }}
+          />
           {error && (
             <View style={{ backgroundColor: colors.dangerSoft, borderRadius: 8, padding: space(3) }}>
               <Text style={[T.dim, { color: colors.danger }]}>{error}</Text>
@@ -89,7 +115,7 @@ function InitiateSection() {
           <Button
             label={busy ? 'Avvio in corso…' : 'Avvia richiesta di rotazione'}
             onPress={handleInitiate}
-            disabled={busy}
+            disabled={busy || oldOwnerId.trim().length === 0}
           />
         </>
       ) : (
