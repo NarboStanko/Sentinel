@@ -110,6 +110,16 @@ CREATE TABLE IF NOT EXISTS audit_chain (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_chain_owner ON audit_chain(chain_owner_id, chain_index);
 
+-- Anti-replay persistente: nonce gia' visti (key = "pub:ts:sig").
+-- In SQLite (non in memoria) perche' la protezione deve sopravvivere ai
+-- riavvii del server: entro la finestra timestamp una richiesta firmata
+-- gia' vista non deve essere rigiocabile. Cleanup per inserted_at < TTL.
+CREATE TABLE IF NOT EXISTS seen_nonces (
+  key TEXT PRIMARY KEY,
+  inserted_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_seen_nonces_inserted ON seen_nonces(inserted_at);
+
 -- Contatori per il rate limiting. Chiavi: ip:{ip}, submit:{switchId}:{ip},
 -- cumul:{switchId}:{ip} (cumulativo lifetme), lockout:{switchId}:{ip},
 -- lockout_window:{switchId}:{ip}.

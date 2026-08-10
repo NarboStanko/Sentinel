@@ -12,27 +12,30 @@ declare module 'fastify' {
   interface FastifyRequest { actor?: Actor; }
 }
 
-// Replay-protection cache: key = "${pub}:${ts}:${sig}", value = insertion timestamp
-const seenNonces = new Map<string, number>();
+// Replay-protection PERSISTENTE (tabella seen_nonces, key = "${pub}:${ts}:${sig}").
+// In SQLite e non in memoria: una Map si azzererebbe al riavvio del server,
+// riaprendo per ±5 min la finestra in cui una richiesta firmata già vista
+// sarebbe rigiocabile. Il TTL (6 min) copre l'intera finestra timestamp.
 const NONCE_TTL = 6 * 60_000;
 
 function cleanupNonces(): void {
-  const cutoff = Date.now() - NONCE_TTL;
-  for (const [k, t] of seenNonces) {
-    if (t < cutoff) seenNonces.delete(k);
-  }
+  db.prepare('DELETE FROM seen_nonces WHERE inserted_at < ?').run(Date.now() - NONCE_TTL);
 }
 
+// Check-and-register ATOMICO in un'unica query: INSERT OR IGNORE inserisce solo
+// se la key non esiste; changes === 0 significa nonce già visto → replay.
+// (La Map precedente faceva has()+set() in due passi.)
 function checkAndRegisterNonce(pub: string, ts: number, sig: string): boolean {
   cleanupNonces();
   const key = `${pub}:${ts}:${sig}`;
-  if (seenNonces.has(key)) return false;
-  seenNonces.set(key, Date.now());
-  return true;
+  const info = db.prepare('INSERT OR IGNORE INTO seen_nonces (key, inserted_at) VALUES (?, ?)')
+    .run(key, Date.now());
+  return info.changes > 0;
 }
 
+// Reset completo — usato dai test.
 export function clearNonceCache(): void {
-  seenNonces.clear();
+  db.prepare('DELETE FROM seen_nonces').run();
 }
 
 // DEVE essere identica a app/lib/canonicalize.ts canonicalize().

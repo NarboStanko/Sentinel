@@ -171,6 +171,28 @@ await test('6) replay — stessa firma riutilizzata → 401', async () => {
   if (r2.statusCode !== 401) throw new Error(`replay: atteso 401, ricevuto ${r2.statusCode}`);
 });
 
+// 6b. Anti-replay PERSISTENTE (A2): il nonce visto sta in seen_nonces (SQLite),
+//     non in una Map in memoria → sopravvive al riavvio del server. Un riavvio
+//     azzererebbe solo la memoria del processo, mai la tabella: se il nonce è
+//     nel DB, il replay resta 401 anche dopo restart.
+await test('6b) anti-replay persistente — nonce nel DB, replay 401 dopo "riavvio"', async () => {
+  const { switchId, contactPriv, contactPub } = await mkScenario();
+  const ts  = nextTs();
+  const sig = signRequest(contactPriv, contactPub, 'POST', '/release/confirm', ts, { switchId });
+  const payload = { switchId, pub: contactPub, ts, sig };
+  const r1 = await app.inject({ method: 'POST', url: '/release/confirm', payload });
+  if (r1.statusCode !== 200) throw new Error(`prima chiamata: atteso 200, ricevuto ${r1.statusCode}`);
+  // Il nonce deve essere PERSISTITO nella tabella, non in memoria.
+  const row = db.prepare('SELECT inserted_at FROM seen_nonces WHERE key = ?')
+    .get(`${contactPub}:${ts}:${sig}`) as { inserted_at: number } | undefined;
+  if (!row) throw new Error('nonce non trovato in seen_nonces: la persistenza non funziona');
+  // "Riavvio" simulato: la memoria del processo non custodisce più alcuno stato
+  // anti-replay (non esiste più la Map); ciò che conta è solo il DB, che dopo
+  // un restart reale è intatto. Il replay deve restare 401.
+  const r2 = await app.inject({ method: 'POST', url: '/release/confirm', payload });
+  if (r2.statusCode !== 401) throw new Error(`replay post-riavvio: atteso 401, ricevuto ${r2.statusCode}`);
+});
+
 // 7. Contatto di uno switch diverso (non collegato a questo switch) → 401
 await test('7) contatto valido ma di uno switch diverso → 401', async () => {
   const s1 = await mkScenario();

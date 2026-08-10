@@ -1,5 +1,5 @@
 import {
-  newSeedPhrase, isValidSeedPhrase, identityFromSeed, fingerprint,
+  newSeedPhrase, isValidSeedPhrase, identityFromSeed,
   safetyNumber, signChallenge,
   sealTo, openWith, encryptContent, decryptContent,
   splitSecret, combineSecret, shareToWire, shareFromWire,
@@ -28,9 +28,8 @@ const a = identityFromSeed(m);
 const b = identityFromSeed(m);
 ok(bytesToHex(a.pub) === bytesToHex(b.pub), 'stesse 12 parole -> stessa chiave pubblica');
 ok(bytesToHex(a.priv) === bytesToHex(b.priv), 'stesse 12 parole -> stessa chiave privata');
-console.log('   impronta (safety number):', fingerprint(a.pub));
 const other = identityFromSeed(newSeedPhrase());
-ok(fingerprint(a.pub) !== fingerprint(other.pub), 'seed diverse -> impronte diverse');
+ok(bytesToHex(a.pub) !== bytesToHex(other.pub), 'seed diverse -> chiavi pubbliche diverse');
 
 // ══════════════════════════════════════════════════════════════════════
 // 2) ECDH seal/open
@@ -62,19 +61,16 @@ const oneDek = combineSecret([shareToWire(shares[0])].map(shareFromWire));
 ok(bytesToHex(oneDek) !== bytesToHex(dek), '1 sola quota NON ricostruisce la chiave');
 
 // ══════════════════════════════════════════════════════════════════════
-// 4) VETTORI FISSI — mnemonic noto → pubkey/fingerprint registrati
+// 4) VETTORI FISSI — mnemonic noto → pubkey registrata
 // ══════════════════════════════════════════════════════════════════════
 console.log('4) Vettori fissi — derivazione deterministica cross-platform');
 // Mnemonic BIP39 standard (abandon×11 + about).
 // Valori registrati localmente il 2026-05-24; se cambiano, identityFromSeed e rotta.
 const FIXED_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const FIXED_PUB_HEX  = '024ed395825486a3628176b579749981dca9927c319f6f7ad136d324931da0f661';
-const FIXED_FP       = 'DC5E988357E4';
 const fixedId = identityFromSeed(FIXED_MNEMONIC);
 ok(bytesToHex(fixedId.pub) === FIXED_PUB_HEX,
   'vettore fisso: mnemonic noto → pubkey registrata (derivazione stabile)');
-ok(fingerprint(fixedId.pub) === FIXED_FP,
-  'vettore fisso: fingerprint registrato');
 ok(isValidSeedPhrase(FIXED_MNEMONIC),
   'vettore fisso: mnemonic valido per BIP39');
 

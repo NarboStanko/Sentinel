@@ -42,11 +42,6 @@ export function identityFromSeed(mnemonic: string): Identity {
   const pub = p256.getPublicKey(priv, true); // compresso (33B)
   return { priv, pub };
 }
-// impronta breve per verifica visiva (es. "safety number")
-export function fingerprint(pub: Uint8Array): string {
-  return bytesToHex(sha256(pub)).slice(0, 12).toUpperCase();
-}
-
 // confronto lessicografico usato per ordinamento deterministico
 function compareBytes(a: Uint8Array, b: Uint8Array): number {
   const len = Math.min(a.length, b.length);
