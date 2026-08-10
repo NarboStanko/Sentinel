@@ -1,4 +1,5 @@
 import 'react-native-get-random-values';
+import '../lib/polyfills'; // TextEncoder/TextDecoder per Hermes — prima di ogni modulo che li usa
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import { Stack, router } from 'expo-router';

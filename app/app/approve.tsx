@@ -73,19 +73,47 @@ export default function Approve() {
   }, [paramSwitchId]);
 
   // Prova a ricostruire dalle quote raccolte; se decifra, la soglia è raggiunta.
+  // L'ordine confirm→download è OBBLIGATO: il server non conosce k, quindi espone
+  // i puntatori solo dopo che un client conferma il rilascio (RELEASED).
+  // Ritorna false SOLO quando ha senso il messaggio "in attesa di altre approvazioni";
+  // gli errori dopo il rilascio vengono mostrati, mai mascherati da attesa.
   async function tryReconstruct(collected: { x: number; y: string }[]) {
     if (collected.length < 2) return false;
+
+    let dek: Uint8Array;
     try {
-      const dek = combineSecret(collected.map(shareFromWire));
+      dek = combineSecret(collected.map(shareFromWire));
+    } catch (e) {
+      console.log('[approve] ricombinazione non riuscita, quote insufficienti o incoerenti', e);
+      return false;
+    }
 
-      try { await api.releaseConfirm(switchId!); } catch { /* già RELEASED o rete */ }
+    try { await api.releaseConfirm(switchId!); } catch { /* già RELEASED o rete: fa fede la lettura sotto */ }
 
-      const released = await api.approvalRequest(switchId!);
-      if (!released.contents || released.contents.length === 0) return false;
+    let released: Awaited<ReturnType<typeof api.approvalRequest>>;
+    try {
+      released = await api.approvalRequest(switchId!);
+    } catch (e) {
+      console.error('[approve] stato del rilascio non leggibile (rete?)', e);
+      return false; // stato ignoto: l'attesa resta il messaggio meno fuorviante
+    }
+    if (!released.contents || released.contents.length === 0) return false;
 
+    // Da qui il rilascio È avvenuto: distinguere download fallito da decifratura fallita.
+    try {
       const items: ContentItem[] = [];
       for (const c of released.contents) {
-        const ctHex = await downloadEncrypted(c.drivePointer);
+        let ctHex: string;
+        try {
+          ctHex = await downloadEncrypted(c.drivePointer);
+        } catch (e: any) {
+          console.error('[approve] rilascio avvenuto ma download fallito', c.drivePointer, e);
+          setErr(
+            'Soglia raggiunta, ma non è stato possibile scaricare il contenuto: '
+            + (e?.message ?? String(e)) + ' La tua approvazione è registrata — riprova più tardi.'
+          );
+          return true;
+        }
         const plain = decryptContent(dek, c.contentIv, ctHex);
         const manifest = JSON.parse(new TextDecoder().decode(plain));
         items.push({
@@ -99,7 +127,17 @@ export default function Approve() {
       setContentItems(items);
       setStatus('Soglia raggiunta — documentazione rilasciata');
       return true;
-    } catch { return false; }
+    } catch (e) {
+      // Decifratura fallita: con k>2 può semplicemente mancare qualche quota
+      // (la DEK ricombinata da meno di k quote è spazzatura) — non è detto che
+      // sia un errore. Se persiste con tutte le quote, il contenuto è danneggiato.
+      console.error('[approve] contenuto scaricato ma non decifrabile', e);
+      setStatus(
+        `Contenuto scaricato ma non ancora decifrabile con ${collected.length} quote raccolte: `
+        + 'probabilmente servono altre approvazioni.'
+      );
+      return true;
+    }
   }
 
   async function approve() {

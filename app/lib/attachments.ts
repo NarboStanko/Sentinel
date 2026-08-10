@@ -1,6 +1,7 @@
 import { bytesToHex, hexToBytes, randomBytes } from '@noble/hashes/utils';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha';
 import { getActiveProvider } from './storage';
+import { downloadBlob } from './drive';
 
 export const MAX_FILE_BYTES  = 25 * 1024 * 1024;   // 25 MB per file
 export const MAX_TOTAL_BYTES = 200 * 1024 * 1024;  // 200 MB pacchetto totale
@@ -45,7 +46,9 @@ export async function encryptAndUpload(
 }
 
 // Scarica e decifra un allegato; restituisce i byte in chiaro.
+// Usa downloadBlob (non il provider attivo): anche i contatti, senza alcun
+// provider configurato, devono poter scaricare gli allegati dopo il rilascio.
 export async function decryptAttachment(meta: AttachmentMeta, dek: Uint8Array): Promise<Uint8Array> {
-  const ct = await getActiveProvider().download(meta.pointer);
+  const ct = await downloadBlob(meta.pointer);
   return xchacha20poly1305(dek, hexToBytes(meta.nonce)).decrypt(ct);
 }
