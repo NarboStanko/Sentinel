@@ -12,15 +12,10 @@ import { hexToBytes } from '@noble/hashes/utils';
 // chiave privata derivata dalla seed phrase. Niente password, niente segreti
 // lato server. E' anche il percorso di recovery: "perso il telefono -> entro
 // da browser inserendo la seed".
+// NESSUN token di sessione: il challenge-response prova l'identità e
+// restituisce ownerId + switches; ogni operazione successiva usa la firma
+// per-richiesta (requireAuth), un solo modello di auth in tutto il sistema.
 const challenges = new Map<string, { nonce: string; exp: number }>();
-const sessions = new Map<string, { ownerId: string; exp: number }>();
-
-export function verifySession(token?: string): string | null {
-  if (!token) return null;
-  const s = sessions.get(token);
-  if (!s || s.exp < Date.now()) return null;
-  return s.ownerId;
-}
 
 export async function authRoutes(app: FastifyInstance) {
   // 1) il client chiede una sfida per la propria chiave pubblica
@@ -52,12 +47,10 @@ export async function authRoutes(app: FastifyInstance) {
       if (!user) return { ok: false, reason: 'nessun proprietario per questa chiave' };
       challenges.delete(publicKey);
 
-      const token = nanoid(32);
-      sessions.set(token, { ownerId: user.id, exp: Date.now() + 30 * 60_000 });
       const switches = db.prepare(
         'SELECT id, state, interval_sec, grace_sec, next_check_at FROM switches WHERE owner_id = ?'
       ).all(user.id);
-      return { ok: true, token, ownerId: user.id, switches };
+      return { ok: true, ownerId: user.id, switches };
     }
   );
 }

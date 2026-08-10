@@ -7,7 +7,7 @@ import { randomBytes, bytesToHex } from '../lib/crypto';
 import { hashPin } from '../lib/pinHash';
 import { Screen, Card, Button, T } from '../components/ui';
 import { colors, space, radius } from '../theme';
-import { loadSeed, loadBackupPin, saveBackupPin, loadAuthToken } from '../lib/keystore';
+import { loadSeed, loadBackupPin, saveBackupPin } from '../lib/keystore';
 import { api } from '../lib/api';
 
 type Step = 'pin-setup' | 'pin-enter' | 'biometric' | 'countdown' | 'revealed' | 'hidden';
@@ -48,10 +48,8 @@ export default function Backup() {
         if (c <= 1) {
           clearInterval(t);
           setStep('revealed');
-          // Log audit event (best effort)
-          loadAuthToken().then((token) => {
-            if (token) api.auditBackupViewed(token).catch(() => {});
-          });
+          // Evento audit firmato per-richiesta (best effort)
+          api.auditBackupViewed().catch(() => {});
           return 0;
         }
         return c - 1;

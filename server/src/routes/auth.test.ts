@@ -13,6 +13,7 @@ const { approvalRoutes }          = await import('./approvals.js');
 const { checkinRoutes }           = await import('./checkin.js');
 const { pushRoutes }              = await import('./push.js');
 const { recoveryRoutes }          = await import('./recovery.js');
+const { auditRoutes }             = await import('./audit.js');
 const { registerIpRateLimitHook } = await import('../services/rateLimiter.js');
 const { clearNonceCache, canonicalize } = await import('../middleware/auth.js');
 const { canonicalize: canonicalizeClient } = await import('../../../app/lib/canonicalize.js');
@@ -31,6 +32,7 @@ await app.register(approvalRoutes);
 await app.register(checkinRoutes);
 await app.register(pushRoutes);
 await app.register(recoveryRoutes);
+await app.register(auditRoutes);
 await app.ready();
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -451,6 +453,36 @@ await test('31) /approval/submit — re-invio identico → 200 collected; stesso
   if (r3.statusCode !== 409) throw new Error(`overwrite: atteso 409, ricevuto ${r3.statusCode}: ${r3.payload}`);
   const b3 = JSON.parse(r3.payload);
   if (b3.error !== 'share_gia_sottomessa') throw new Error(`atteso share_gia_sottomessa, ricevuto ${b3.error}`);
+});
+
+// ── Test 32-33: rotte audit su firma per-richiesta (A3, niente più token) ─────
+await test('32) /audit/backup-viewed — senza firma → 401; firmato → 200, evento in catena FIRMATO', async () => {
+  const r0 = await app.inject({ method: 'POST', url: '/audit/backup-viewed', payload: {} });
+  if (r0.statusCode !== 401) throw new Error(`senza firma: atteso 401, ricevuto ${r0.statusCode}`);
+  const p = signed(G_PRIV, G_PUB, 'POST', '/audit/backup-viewed', {});
+  const r1 = await app.inject({ method: 'POST', url: '/audit/backup-viewed', payload: p });
+  if (r1.statusCode !== 200) throw new Error(`firmato: atteso 200, ricevuto ${r1.statusCode}: ${r1.payload}`);
+  const row = db.prepare(
+    "SELECT signature FROM audit_chain WHERE event_type='BACKUP_VIEWED' ORDER BY id DESC LIMIT 1"
+  ).get() as { signature: string | null } | undefined;
+  if (!row) throw new Error('evento BACKUP_VIEWED non trovato in catena');
+  if (!row.signature) throw new Error('evento BACKUP_VIEWED in catena con signature null: deve essere firmato');
+});
+
+await test('33) /audit/seed-restore-ack — non-owner → 401; owner dello switch → 200, evento FIRMATO', async () => {
+  const body = { switchId: G_PEND };
+  // Il contatto NON è l'owner dello switch: firma valida ma ruolo sbagliato → 401
+  const pBad = signed(GC_PRIV, GC_PUB, 'POST', '/audit/seed-restore-ack', body);
+  const rBad = await app.inject({ method: 'POST', url: '/audit/seed-restore-ack', payload: pBad });
+  if (rBad.statusCode !== 401) throw new Error(`non-owner: atteso 401, ricevuto ${rBad.statusCode}`);
+  const p = signed(G_PRIV, G_PUB, 'POST', '/audit/seed-restore-ack', body);
+  const r = await app.inject({ method: 'POST', url: '/audit/seed-restore-ack', payload: p });
+  if (r.statusCode !== 200) throw new Error(`owner: atteso 200, ricevuto ${r.statusCode}: ${r.payload}`);
+  const row = db.prepare(
+    "SELECT signature FROM audit_chain WHERE event_type='RECOVERED_DURING_PENDING' ORDER BY id DESC LIMIT 1"
+  ).get() as { signature: string | null } | undefined;
+  if (!row) throw new Error('evento RECOVERED_DURING_PENDING non trovato in catena');
+  if (!row.signature) throw new Error('evento RECOVERED_DURING_PENDING con signature null: deve essere firmato');
 });
 
 // ── Riepilogo ──────────────────────────────────────────────────────────────────

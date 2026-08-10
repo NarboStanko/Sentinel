@@ -90,7 +90,7 @@ export const api = {
   authChallenge: (publicKey: string) =>
     req<{ nonce: string }>('/auth/challenge', 'POST', { publicKey }),
   authVerify: (publicKey: string, nonce: string, sig: string) =>
-    req<{ ok: boolean; reason?: string; token?: string; ownerId?: string; switches?: any[] }>('/auth/verify', 'POST', { publicKey, nonce, sig }),
+    req<{ ok: boolean; reason?: string; ownerId?: string; switches?: any[] }>('/auth/verify', 'POST', { publicKey, nonce, sig }),
   // recovery sociale (fail-safe)
   recoveryInitiate: (ownerId: string, newPublicKey: string, delaySec?: number) =>
     req<{ ok: boolean; recoveryId?: string; unlockAt?: number; reason?: string }>('/recovery/initiate', 'POST', { ownerId, newPublicKey, delaySec }),
@@ -103,10 +103,12 @@ export const api = {
   recoveryPendingForContact: (pub: string, ts: number, sig: string) =>
     req<{ recoveries: any[] }>(`/recovery/pending-for-contact?pub=${encodeURIComponent(pub)}&ts=${ts}&sig=${encodeURIComponent(sig)}`),
 
-  auditBackupViewed: (token: string) =>
-    req<{ ok: boolean }>('/audit/backup-viewed', 'POST', { token }),
-  auditSeedRestoreAck: (token: string, switchId: string) =>
-    req<{ ok: boolean }>('/audit/seed-restore-ack', 'POST', { token, switchId }),
+  // Eventi audit dell'owner: firmati per-richiesta come ogni altra mutazione
+  // (signedReq carica l'identità e firma internamente). Nessun token di sessione.
+  auditBackupViewed: () =>
+    signedReq<{ ok: boolean }>('/audit/backup-viewed', 'POST', {}),
+  auditSeedRestoreAck: (switchId: string) =>
+    signedReq<{ ok: boolean }>('/audit/seed-restore-ack', 'POST', { switchId }),
   registerPush: (role: 'owner' | 'contact', id: string, pushToken: string) =>
     signedReq<{ ok: boolean }>('/push/register', 'POST', { role, id, pushToken }),
 

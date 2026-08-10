@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { Screen, Card, Button, T } from '../components/ui';
 import { colors, space } from '../theme';
 import { isValidSeedPhrase, identityFromSeed, bytesToHex, signChallenge } from '../lib/crypto';
-import { saveSeed, saveOwnerId, saveSwitchId, saveAuthToken } from '../lib/keystore';
+import { saveSeed, saveOwnerId, saveSwitchId } from '../lib/keystore';
 import { api } from '../lib/api';
 import { setUnlocked } from '../lib/lockState';
 
@@ -16,7 +16,6 @@ export default function Restore() {
   const [step, setStep] = useState<Step>('input');
   const [error, setError] = useState<string | null>(null);
   const [pendingSwitch, setPendingSwitch] = useState<any>(null);
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [resolvedSwitchId, setResolvedSwitchId] = useState<string | null>(null);
 
   async function handleRestore() {
@@ -36,7 +35,7 @@ export default function Restore() {
       const sig = signChallenge(identity.priv, nonce);
       const result = await api.authVerify(pubHex, nonce, sig);
 
-      if (!result.ok || !result.token || !result.ownerId) {
+      if (!result.ok || !result.ownerId) {
         setError(result.reason ?? 'Autenticazione fallita. Questo account non esiste o la seed è errata.');
         return;
       }
@@ -44,8 +43,6 @@ export default function Restore() {
       // Persisti identità
       await saveSeed(trimmed);
       await saveOwnerId(result.ownerId);
-      await saveAuthToken(result.token);
-      setSessionToken(result.token);
       // L'utente si è appena autenticato con la seed: sessione sbloccata
       // (copre tutte le uscite verso /home: diretta, disarma, lascia armato).
       setUnlocked(true);
@@ -80,9 +77,8 @@ export default function Restore() {
     setBusy(true);
     try {
       await api.disarm(resolvedSwitchId);
-      if (sessionToken) {
-        api.auditSeedRestoreAck(sessionToken, resolvedSwitchId).catch(() => {});
-      }
+      // Evento audit firmato per-richiesta (l'identità è appena stata salvata). Best effort.
+      api.auditSeedRestoreAck(resolvedSwitchId).catch(() => {});
     } catch { /* best effort */ } finally {
       setBusy(false);
     }

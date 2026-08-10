@@ -142,15 +142,6 @@ export async function deleteMyContactId(contactId: string): Promise<void> {
   await SecureStore.setItemAsync(MY_CONTACT_IDS_KEY, JSON.stringify(filtered));
 }
 
-// Token di sessione dalla /auth/verify (usato per audit, scade in 30min)
-const AUTH_TOKEN_KEY = 'sentinella.auth_token';
-export async function saveAuthToken(token: string): Promise<void> {
-  await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
-}
-export async function loadAuthToken(): Promise<string | null> {
-  return SecureStore.getItemAsync(AUTH_TOKEN_KEY);
-}
-
 // PIN di coercizione (duress PIN) — separato dal PIN di backup seed.
 // Modalità: 'facade' (mostra dati fittizi) | 'trigger' (avvia rilascio silenzioso).
 const DURESS_PIN_KEY = 'sentinella.duress_pin';
