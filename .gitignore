@@ -18,3 +18,5 @@ server/sentinella.db-shm
 server/sentinella.db-wal
 server/q.cjs
 server/q.js
+
+server/*.cjs

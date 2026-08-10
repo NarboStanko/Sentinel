@@ -1,5 +1,33 @@
 # Sentinella — Trovamenti dell'audit e piano di rimedio
 
+## Stato finale audit autonomo (agosto 2026)
+
+**CRITICI:**
+- **C1 (PIN con SHA-256 singola):** INDAGATO, richiede modulo nativo. Benchmark su device mostrano che nessuna KDF senza-build è praticabile su Hermes (scrypt/PBKDF2 JS = secondi; iterazione SHA-256 nativa dominata dall'overhead del bridge). Rimandato all'audit professionale. Vedi [docs/C1_ESITO.md](C1_ESITO.md). Commit di documentazione.
+- **C2 (esche distinguibili dal server):** RISOLTO e verificato E2E su 3 dispositivi. Indice x rimosso dal wire all'arm; x vive dentro il blob cifrato; schema arm `.strict()` rifiuta x. Commit 7890f46.
+- **C3 (server apprende k):** RISOLTO fase 1. recoveryK non più inviato all'arm; recovery_k usa default 2. Fase 2 (UI quorum recovery disaccoppiato) rimandata. Commit 906fc12.
+
+**ALTI:**
+- **A1 (threshold_k colonna inesistente):** RISOLTO. Rompeva il restore-da-seed. Commit 0e79190.
+- **A2 (anti-replay solo in memoria):** RISOLTO. Cache nonce spostata da Map in-memory a tabella SQLite `seen_nonces` (INSERT OR IGNORE atomico), sopravvive ai riavvii. Commit 1d8832d.
+- **A3 (token di sessione residuo):** RISOLTO. Le 2 rotte `/audit/*` passano da token di sessione a firma per-richiesta; i 2 eventi (BACKUP_VIEWED, RECOVERED_DURING_PENDING) ora entrano in catena FIRMATI. Rimossi sessions/verifySession/token. Auth unificata su firma per-richiesta. Verificato E2E (restore + backup su device). Commit 766a2dc.
+
+**MEDI:**
+- **M1 (shuffle esche con Math.random):** RISOLTO. Fisher-Yates con entropia sicura (randomBytes) + rejection sampling. Prova empirica: bias del vecchio `sort(Math.random-0.5)` era 77,6%, il nuovo 1,28%. Commit a93c2ee.
+- **M2 (Math.random in checkin jitter):** VALUTATO non-critico. Il jitter è anti-thundering-herd (distribuzione carico), non contromisura di sicurezza. Documentato nel codice. Chiuso.
+- **M3 (safety number 48 bit):** FALSO ALLARME. Il safety number di pairing usa `safetyNumber()` = 66 bit (6 parole BIP39, ordinamento commutativo), adeguato. Il "48 bit" era `fingerprint()`, funzione NON usata in produzione (codice morto), rimossa. Commit 1d8832d.
+- **M4 (naming "audit log firmato" fuorviante):** APERTO, solo documentazione. Non è un bug: è hash-chain + firme di richiesta; gli eventi automatici hanno signature null per scelta (il server non deve poter firmare). Allineare naming/doc.
+- **M5 (P-256 reimplementata a mano nella console web):** APERTO, per l'audit. Riguarda uno strumento accessorio (console web di verifica), non l'app. Valutare se usare libreria auditata o rimuovere lo strumento.
+- **M6 (blob Drive "anyone with link", no forward secrecy):** APERTO, per l'audit. Scelta documentata (riservatezza nella cifratura, non nell'ACL). Valutare rotazione chiavi o accettare come limite.
+
+**NOTE PRATICHE (non trovamenti audit):**
+- Cache-facciata token al bootstrap: `isFacadeActive` a volte true prima dello sblocco → registrazione push token fallisce con "Connessione non disponibile" (cosmetico, il token si registra dopo lo sblocco). Non risolto, annotato.
+- Migrazione `shares.x` nullable in produzione: lo schema CREATE IF NOT EXISTS non aggiorna DB esistenti; in dev si ricrea il DB, in produzione servirà una migrazione ALTER. TODO.
+
+**SINTESI:** tutti i critici e gli alti sono affrontati (C2/C3/A1/A2/A3 risolti, C1 documentato per audit). Medi reali risolti (M1) o chiariti (M2/M3). Restano M4 (doc), M5/M6 (valutazioni da specialista) per l'audit professionale.
+
+---
+
 Esito del triage dei trovamenti emersi dall'inventario crittografico (luglio 2026).
 Ogni voce è stata investigata: stato (reale / falso allarme / da verificare), gravità, e note per il fix.
 
