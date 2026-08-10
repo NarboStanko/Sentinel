@@ -10,18 +10,18 @@ L'ordine di lavoro suggerito è per gravità e per rischio di regressione: prima
 ## Critici — rompono garanzie di sicurezza dichiarate
 
 ### C1 — PIN hashati con singola SHA-256
-**Stato:** reale, confermato (`pinHash.ts`).
+**Stato:** reale, confermato (`pinHash.ts`). **AGGIORNATO (agosto 2026):** indagato, non risolvibile senza modulo nativo. Vedi [docs/C1_ESITO.md](C1_ESITO.md). Rimandato all'audit professionale con benchmark a supporto.
 **Impatto:** un PIN di 6 cifre ha 10^6 combinazioni; con SHA-256 singola, chi estrae il record da SecureStore le prova tutte in una frazione di secondo. **Conseguenza più grave:** un'analisi forense recupera sia il PIN normale sia il PIN duress, e potendo distinguerli vanifica l'indistinguibilità del duress a livello di storage — proprio la garanzia che la modalità di coercizione promette.
 **Fix:** sostituire con una KDF lenta e salata — Argon2id (preferito) o PBKDF2 con conteggio iterazioni elevato. Salt casuale per PIN, già presente nel record.
 **Attenzione:** tocca lo storage dei PIN esistenti. Serve una **migrazione**: i PIN già impostati sono hashati col vecchio schema. Prevedere re-hash al primo sblocco riuscito, o forzare reimpostazione. Da progettare con cura per non bloccare fuori l'utente. **Non fare di fretta.**
 
 ### C2 — Le esche sono distinguibili dal server
-**Stato:** reale (indici quote reali `x = 1…N`, esche `x = 100+j`, `x` in chiaro nella tabella `shares`).
+**Stato:** reale (indici quote reali `x = 1…N`, esche `x = 100+j`, `x` in chiaro nella tabella `shares`). **AGGIORNATO (agosto 2026):** FATTO e verificato E2E su 3 dispositivi. Commit 7890f46. Indice x rimosso dal wire all'arm; x vive dentro il blob cifrato; schema arm `.strict()` rifiuta x.
 **Impatto:** un server compromesso distingue quote reali da esche guardando l'indice, e contando le reali apprende N. Contraddice il commento in `db.ts` e la garanzia 3.3 del threat model.
 **Fix:** assegnare alle esche indici nello stesso spazio delle quote reali, oppure rendere le quote uniformemente opache al server. Verificare che la ricombinazione lato client continui a selezionare le quote corrette.
 
 ### C3 — Il server apprende k (la soglia)
-**Stato:** reale (`compose.tsx` invia `recoveryK: threshold`; `/switch/arm` lo persiste in `users.recovery_k`).
+**Stato:** reale (`compose.tsx` invia `recoveryK: threshold`; `/switch/arm` lo persiste in `users.recovery_k`). **AGGIORNATO (agosto 2026):** FATTO fase 1. Commit 906fc12. recoveryK non più inviato all'arm; recovery_k usa default 2. Fase 2 (UI quorum recovery disaccoppiato) rimandata.
 **Impatto:** il server conosce quanti contatti servono per il rilascio — informazione che l'invariante dichiarata (`switch.ts:46`, «k NON viene inviata al server») nega. Divergenza tra codice e modello.
 **Fix:** decidere quale delle due è la verità voluta. Se k deve restare privato al server, rimuovere l'invio e gestire la soglia lato client / dentro il materiale cifrato. Se il server ha legittimamente bisogno di `recovery_k` per il recovery sociale (che è cosa diversa dalla soglia Shamir del contenuto), allora separare i due concetti e correggere il commento fuorviante. **Chiarire prima il modello, poi il codice.**
 
