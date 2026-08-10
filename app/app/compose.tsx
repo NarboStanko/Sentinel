@@ -23,6 +23,31 @@ import * as ImagePicker from 'expo-image-picker';
 type PresetId = Preset['id'];
 type ExistingContent = { id: string; label: string; created_at: number };
 
+// Intero uniforme in [0, n) da byte casuali crittografici, con rejection
+// sampling: scartando i valori ≥ 256 - (256 % n) si elimina il modulo bias.
+// n qui è al massimo TOTAL (8), quindi un byte per estrazione basta.
+function secureRandomInt(n: number): number {
+  if (n < 1 || n > 256) throw new Error('secureRandomInt: n fuori range');
+  const limit = 256 - (256 % n);
+  for (;;) {
+    const b = randomBytes(1)[0];
+    if (b < limit) return b % n;
+  }
+}
+
+// Fisher-Yates alimentato da randomBytes (la stessa sorgente sicura della DEK):
+// permutazione uniforme, nessun elemento perso o duplicato. L'ordine sul wire
+// non deve contenere alcun segnale che distingua quote reali da esche —
+// sort(() => Math.random() - 0.5) non era né uniforme né sicuro (M1/C2).
+function secureShuffle<T>(arr: T[]): T[] {
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = secureRandomInt(i + 1);
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 export default function Compose() {
   // mode='add' → aggiorna contenuto di switch già armato (senza ridistribuire quote)
   const { mode } = useLocalSearchParams<{ mode?: string }>();
@@ -322,7 +347,7 @@ export default function Compose() {
       const real = recipients.map((c, i) => ({ blob: sealShare(hexToBytes(c.public_key), shares[i]) }));
       const TOTAL = 8;
       const decoys = Array.from({ length: Math.max(0, TOTAL - real.length) }, () => ({ blob: makeDecoy(32) }));
-      const wire = [...real, ...decoys].sort(() => Math.random() - 0.5);
+      const wire = secureShuffle([...real, ...decoys]);
       const { contentId } = await api.arm({ switchId, drivePointer, contentIv: nonce, label: label || undefined, shares: wire });
       await saveContentPointer(switchId, contentId, drivePointer, nonce);
       router.replace('/home');

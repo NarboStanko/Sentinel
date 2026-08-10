@@ -5,6 +5,10 @@ import { appendToChain } from '../services/auditChain.js';
 import { validateBody, checkinSchema } from '../middleware/validate.js';
 
 // +/- 15% di jitter sull'intervallo: rende meno leggibile il ritmo dei check-in.
+// NOTA AUDIT: Math.random qui è DELIBERATO. Il jitter serve a distribuire il
+// carico e a sfumare la cadenza (anti-thundering-herd), NON è una contromisura
+// di sicurezza: non protegge segreti e non richiede imprevedibilità
+// crittografica. Da non risegnalare come uso improprio di PRNG (cfr. M2).
 export function withJitter(sec: number) { return Math.round(sec * (0.85 + Math.random() * 0.30)); }
 
 // L'app risponde «tutto ok» a una push o all'apertura. Resetta il battito.
