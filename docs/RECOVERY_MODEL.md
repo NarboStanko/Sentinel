@@ -127,3 +127,39 @@ Il contatto vede le richieste pendenti automaticamente via `recoveryPendingForCo
 3. Implementare Parte C (vedi sezione 4): endpoint /recovery/status che per un contatto che ha approvato ritorna {finalized, newPublicKey}; l'app del contatto, alla finalizzazione, aggiorna verified_owner_key da A a B SOLO se ha approvato E verso la new_public_key immutabile. Verificare prima che new_public_key sia immutabile dopo l'initiate.
 4. Test E2E completo: dopo il recovery, il contatto DEVE poter operare per il nuovo owner (B) senza "chiave non verificata".
 5. Poi Parte E (UI quorum recovery_k), l'obiettivo originale di C3 fase 2.
+
+## 7. REVISIONE — la lettura del codice ribalta la Parte C
+
+**Scoperta: il "muro Parte C" per i contatti NON esiste. La Parte C (aggiornare la fiducia dei contatti) NON serve.**
+
+Analisi del codice reale:
+- approve.tsx: il contatto carica verifiedOwnerKey ma lo usa SOLO come gate di esistenza (if (!verifiedOwnerKey)), NON lo confronta con la chiave owner del server. Commento nel codice (riga 29-30): "non usa mai la chiave owner dal payload push o dal server". Le operazioni del contatto (findMyShare con id.priv, decifratura, submit) usano la PROPRIA chiave privata, mai quella dell'owner.
+- p256.verify non è chiamato da nessuna schermata client per validare firme dell'owner.
+- approvals.ts (server): le approvazioni lavorano per switchId e quote cifrate (intestate alla chiave del contatto); il legame contatto-owner è per owner_id, IMMUTABILE nella rotazione (cambia solo public_key).
+
+Conseguenza: dopo la rotazione A→B il contatto continua a operare senza modifiche. Nessun fix lato contatto.
+
+Reinterpretazione del "muro" osservato: T1 non poteva più armare perché aveva la VECCHIA chiave A e il server riconosce ora B come owner. Comportamento CORRETTO (il vecchio device non è più l'owner), non un difetto.
+
+**Il difetto VERO (e anche del restore-da-seed su device nuovo):**
+- restore.tsx ripristina ownerId + switchId dal server (authVerify ritorna anche switches), ma NON ripristina verified_contact_keys (locali in SecureStore, persi col vecchio device).
+- compose.tsx: per armare, un contatto scelto deve essere in verifiedKeys (verificato di persona). Su device nuovo è VUOTO.
+- Quindi il nuovo owner riprende accesso + switch ESISTENTI (quote già sigillate funzionano), ma deve ri-verificare i contatti di persona per armare NUOVI switch.
+- Questo è comportamento CORRETTO e VOLUTO: la verifica di persona non deve sopravvivere a un cambio device (altrimenti un server compromesso inietterebbe chiavi contatto false).
+
+**Quadro finale del recovery:**
+1. Contatti dopo la rotazione: funzionano, nessun fix.
+2. Nuovo owner riprende accesso/switch: via login con B (stesso flusso authChallenge/authVerify del restore).
+3. Nuovo owner deve ri-verificare i contatti per armare NUOVI switch: corretto/voluto.
+4. Parte C (aggiornamento fiducia contatti): NON necessaria, ABBANDONATA.
+
+**Fatto in questa sessione:**
+- /recovery/status (C.1) implementato poi RIMOSSO (non necessario). Commit 3522893.
+- C3 fase 2 chiusa con quorum DINAMICO invece di UI: recovery_k calcolato al finalize come min(n, max(2, ceil(n/2))) sui contatti attuali, con guardia n=0. users.recovery_k deprecata (inerte). Commit 3522893.
+- Parte A (initiate chiede ownerId) resta valida. Commit 6b4851e.
+
+**Cosa resta (solo UX minori):**
+- Messaggio chiaro dopo il recovery: informare il nuovo owner che deve ri-verificare i contatti di persona per armare nuovi switch (non un errore criptico).
+- Avviso caso n=1 contatto: quorum=1 è poco sicuro (un solo contatto può avviare la rotazione); segnalarlo.
+
+**Lezione di metodo:** l'analisi ad alto livello aveva ipotizzato un difetto ("i contatti si rompono") che la lettura del codice ha smentito. Leggere il codice prima di implementare ha evitato di costruire una Parte C complessa e inutile in un flusso di sicurezza. Meno superficie, non più.
