@@ -94,9 +94,17 @@ export async function recoveryRoutes(app: FastifyInstance) {
     const rec = db.prepare('SELECT * FROM recoveries WHERE id = ?').get(req.body.recoveryId) as any;
     if (!rec || rec.finalized || rec.cancelled) return { ok: false, reason: 'non finalizzabile' };
     if (Date.now() < rec.unlock_at) return { ok: false, reason: 'ritardo non ancora trascorso' };
-    const k = (db.prepare('SELECT recovery_k FROM users WHERE id = ?').get(rec.owner_id) as any)?.recovery_k ?? 2;
-    const n = (db.prepare('SELECT COUNT(*) AS n FROM recovery_approvals WHERE recovery_id = ?').get(req.body.recoveryId) as any).n;
-    if (n < k) return { ok: false, reason: `servono ${k} approvazioni (${n})` };
+    // recovery_k dinamico: quorum calcolato sui contatti attuali. La colonna
+    // users.recovery_k è deprecata (inerte). Formula: almeno la metà dei
+    // contatti (arrotondata per eccesso), minimo 2, mai più dei contatti
+    // esistenti. n=1→1, n=2→2, n=3→2, n=4→2, n=5→3, n=6→3, n=7→4.
+    const nContacts = (db.prepare('SELECT COUNT(*) AS n FROM contacts WHERE owner_id = ?').get(rec.owner_id) as any).n;
+    // Guardia n=0: senza contatti nessuno può approvare; la formula darebbe
+    // k=0 e "approvazioni >= 0" passerebbe sempre — mai finalizzabile.
+    if (nContacts === 0) return { ok: false, reason: 'nessun contatto disponibile per il recovery' };
+    const k = Math.min(nContacts, Math.max(2, Math.ceil(nContacts / 2)));
+    const approvals = (db.prepare('SELECT COUNT(*) AS n FROM recovery_approvals WHERE recovery_id = ?').get(req.body.recoveryId) as any).n;
+    if (approvals < k) return { ok: false, reason: `servono ${k} approvazioni (${approvals})` };
     const inFlight = db.prepare(
       "SELECT 1 FROM switches WHERE owner_id = ? AND state IN ('GRACE','APPROVAL_PENDING')"
     ).get(rec.owner_id);

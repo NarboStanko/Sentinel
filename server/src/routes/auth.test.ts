@@ -485,6 +485,55 @@ await test('33) /audit/seed-restore-ack — non-owner → 401; owner dello switc
   if (!row.signature) throw new Error('evento RECOVERED_DURING_PENDING con signature null: deve essere firmato');
 });
 
+// ── Test 35: /recovery/finalize — quorum dinamico sui contatti attuali ────────
+await test('35) /recovery/finalize — quorum dinamico: n=3 richiede 2 approvazioni; n=0 rifiutato', async () => {
+  // Owner dedicato con 3 contatti → k atteso = min(3, max(2, ceil(3/2))) = 2
+  const OW = 'usr_dynk_t1';
+  db.prepare('INSERT INTO users (id, public_key, created_at) VALUES (?,?,?)')
+    .run(OW, bytesToHex(p256.getPublicKey(p256.utils.randomPrivateKey(), true)), Date.now());
+  const contactPubs: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    const pub = bytesToHex(p256.getPublicKey(p256.utils.randomPrivateKey(), true));
+    contactPubs.push(pub);
+    db.prepare('INSERT INTO contacts (id, owner_id, public_key, push_token, to_hash, created_at) VALUES (?,?,?,?,?,?)')
+      .run(`c_dynk_${i}`, OW, pub, `push_dynk_${i}`, `hash_dynk_${i}`, Date.now());
+  }
+  // Recovery già maturo (unlock_at nel passato)
+  const REC = 'rec_dynk_t1';
+  const NEW_PUB = bytesToHex(p256.getPublicKey(p256.utils.randomPrivateKey(), true));
+  db.prepare('INSERT INTO recoveries (id, owner_id, new_public_key, unlock_at, created_at) VALUES (?,?,?,?,?)')
+    .run(REC, OW, NEW_PUB, Date.now() - 1000, Date.now());
+
+  // 1 sola approvazione → deve fallire chiedendone 2
+  db.prepare('INSERT INTO recovery_approvals (recovery_id, contact_public_key, created_at) VALUES (?,?,?)')
+    .run(REC, contactPubs[0], Date.now());
+  const r1 = await app.inject({ method: 'POST', url: '/recovery/finalize', payload: { recoveryId: REC } });
+  const b1 = JSON.parse(r1.payload);
+  if (b1.ok !== false || !/servono 2 approvazioni/.test(b1.reason ?? ''))
+    throw new Error(`con 1 approvazione su 3 contatti: atteso rifiuto "servono 2", ricevuto ${r1.payload}`);
+
+  // Seconda approvazione → finalize riesce e la chiave ruota
+  db.prepare('INSERT INTO recovery_approvals (recovery_id, contact_public_key, created_at) VALUES (?,?,?)')
+    .run(REC, contactPubs[1], Date.now());
+  const r2 = await app.inject({ method: 'POST', url: '/recovery/finalize', payload: { recoveryId: REC } });
+  const b2 = JSON.parse(r2.payload);
+  if (b2.ok !== true) throw new Error(`con 2 approvazioni: atteso ok, ricevuto ${r2.payload}`);
+  const rotated = db.prepare('SELECT public_key FROM users WHERE id = ?').get(OW) as { public_key: string };
+  if (rotated.public_key !== NEW_PUB) throw new Error('la chiave pubblica non è stata ruotata');
+
+  // Owner SENZA contatti → guardia n=0: mai finalizzabile
+  const OW0 = 'usr_dynk_t0';
+  db.prepare('INSERT INTO users (id, public_key, created_at) VALUES (?,?,?)')
+    .run(OW0, bytesToHex(p256.getPublicKey(p256.utils.randomPrivateKey(), true)), Date.now());
+  const REC0 = 'rec_dynk_t0';
+  db.prepare('INSERT INTO recoveries (id, owner_id, new_public_key, unlock_at, created_at) VALUES (?,?,?,?,?)')
+    .run(REC0, OW0, NEW_PUB, Date.now() - 1000, Date.now());
+  const r0 = await app.inject({ method: 'POST', url: '/recovery/finalize', payload: { recoveryId: REC0 } });
+  const b0 = JSON.parse(r0.payload);
+  if (b0.ok !== false || !/nessun contatto disponibile/.test(b0.reason ?? ''))
+    throw new Error(`n=0: atteso rifiuto con guardia, ricevuto ${r0.payload}`);
+});
+
 // ── Riepilogo ──────────────────────────────────────────────────────────────────
 console.log(`\n${passed + failed} test — ${passed} ok, ${failed} falliti\n`);
 if (failed > 0) process.exit(1);
