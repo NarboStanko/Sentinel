@@ -20,3 +20,7 @@ server/q.cjs
 server/q.js
 
 server/*.cjs
+
+# Firebase / Google config (contiene chiavi client, non versionare)
+app/google-services.json
+app/GoogleService-Info.plist
