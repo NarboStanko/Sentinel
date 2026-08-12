@@ -1,4 +1,4 @@
-// Test Compito 7.4: audit log firmato a catena di hash.
+// Test: catena di hash (hash-linked); eventi utente firmati P-256, eventi automatici con signature null.
 // Fase 1 (test 1-6): unità — appendToChain, computeEventHash, isolamento catene.
 // Fase 3 (test 7-9): endpoint HTTP — GET /audit/anchor, GET /audit/events.
 // Fase 5 (test 10-11): E2E — simulazione attacco, verifica con ancoraggio.

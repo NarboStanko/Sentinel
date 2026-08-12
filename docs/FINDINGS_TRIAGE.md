@@ -17,8 +17,8 @@
 - **M2 (Math.random in checkin jitter):** VALUTATO non-critico. Il jitter è anti-thundering-herd (distribuzione carico), non contromisura di sicurezza. Documentato nel codice. Chiuso.
 - **M3 (safety number 48 bit):** FALSO ALLARME. Il safety number di pairing usa `safetyNumber()` = 66 bit (6 parole BIP39, ordinamento commutativo), adeguato. Il "48 bit" era `fingerprint()`, funzione NON usata in produzione (codice morto), rimossa. Commit 1d8832d.
 - **M4 (naming "audit log firmato" fuorviante):** APERTO, solo documentazione. Non è un bug: è hash-chain + firme di richiesta; gli eventi automatici hanno signature null per scelta (il server non deve poter firmare). Allineare naming/doc.
-- **M5 (P-256 reimplementata a mano nella console web):** APERTO, per l'audit. Riguarda uno strumento accessorio (console web di verifica), non l'app. Valutare se usare libreria auditata o rimuovere lo strumento.
-- **M6 (blob Drive "anyone with link", no forward secrecy):** APERTO, per l'audit. Scelta documentata (riservatezza nella cifratura, non nell'ACL). Valutare rotazione chiavi o accettare come limite.
+- **M5 (P-256 reimplementata a mano nella console web):** VALUTATO — scelta offline-first deliberata, firma nativa, rischio timing basso; rischio lock-out da testare, rischio contesto-browser da hardenare all'audit. Vedi CRYPTO_INVENTORY.md §10.7.
+- **M6 (blob Drive "anyone with link", no forward secrecy):** VALUTATO — trade-off strutturale accettato: la forward secrecy richiederebbe un potere di cancellazione che indebolirebbe la consegna (scopo primario) o darebbe potere al server sui dati. Difesa primaria Shamir intatta. Riprogettazione (non fix) per forward secrecy vera. Vedi CRYPTO_INVENTORY §10.12.
 
 **NOTE PRATICHE (non trovamenti audit):**
 - Cache-facciata token al bootstrap: `isFacadeActive` a volte true prima dello sblocco → registrazione push token fallisce con "Connessione non disponibile" (cosmetico, il token si registra dopo lo sblocco). Non risolto, annotato.

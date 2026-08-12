@@ -297,6 +297,28 @@ la seed è il segreto massimo del sistema e viene processata da codice non audit
 browser (estensioni, cache, devtools). Ogni divergenza da `@noble/curves` qui è anche un rischio di
 lock-out (pubkey diversa → identità diversa).
 
+**Contesto e decisione (M5):**
+- La scelta di implementare l'aritmetica di curva a mano è DELIBERATA: la console è uno strumento
+  di recupero d'emergenza pensato per funzionare offline, e Web Crypto non espone la
+  moltiplicazione scalare (priv × G) necessaria a derivare la pubkey. La FIRMA usa invece Web
+  Crypto nativo (`crypto.subtle`, ECDSA) — solo la derivazione pubkey è a mano.
+- Rischio timing side-channel: BASSO nel contesto. L'operazione è client-side, sul dispositivo
+  dell'utente, one-shot (una derivazione all'avvio), quindi non offre superficie statistica per un
+  attacco timing; un attaccante con codice nella pagina avrebbe comunque accesso diretto alla seed.
+- Rischio lock-out (PIÙ CONCRETO): se la derivazione a mano diverge anche di un bit da
+  `@noble/curves` usato nell'app, la stessa seed produce identità diverse → auth fallita nel
+  momento del recupero. VA VERIFICATO con un test di equivalenza (stessa seed → stessa pubkey
+  compressa in console e app) su alcune seed di prova.
+- Rischio a monte (indipendente dall'implementazione): la console processa la SEED in un contesto
+  browser (estensioni, devtools, cache, e possibile manomissione della pagina se servita da fonte
+  non fidata). Questo è il rischio maggiore, non la P-256 a mano. Raccomandazione: aprire la
+  console solo da file locale verificato o HTTPS fidato, idealmente su dispositivo offline.
+
+**Decisione:** accettato nel contesto attuale (offline-first, firma già nativa, timing basso). Per
+l'audit professionale: (1) validare l'equivalenza console↔app per escludere lock-out; (2) valutare
+se inlinare `@noble/curves` come bundle standalone mantenendo il funzionamento offline; (3)
+valutare hardening del contesto browser (come si serve/apre la pagina).
+
 ### 10.8 Derivazione identità non standard
 `sha256(seed) mod (n−1) + 1` (§9) invece di BIP32/SLIP-10: funziona, ma è una costruzione
 custom, senza passphrase BIP39, senza possibilità di derivare chiavi multiple, con bias modulare
@@ -332,6 +354,30 @@ questi ID (generati con `nanoid(10)`, ~60 bit).
 su XChaCha20-Poly1305 + Shamir. Corretto sul piano crittografico, ma: il fileId è una capability
 permanente, il ciphertext resta scaricabile per sempre (nessuna forward secrecy: un k-quorum
 futuro + blob archiviato = rilascio), e i pattern di accesso a Drive sono visibili a Google.
+
+**Analisi M6 — tensione strutturale (non un bug):**
+La mitigazione ovvia (cancellare/scadere il blob dopo la consegna) richiede di rispondere a: chi ha
+l'autorità di cancellare? Sentinella è un dead-man's switch: lo switch va in RELEASED perché
+l'owner non risponde (arresto, sparizione, morte), quindi l'owner NON è disponibile quando ci
+sarebbe da cancellare. Ipotesi valutate:
+- Token OAuth dell'owner sul server: i token scadono (owner sparito = account inattivo); e dare al
+  server il potere di cancellare su Drive dell'owner contraddice il principio (server = puntatori
+  opachi, nessun potere sui contenuti) e apre il sabotaggio del rilascio da parte di un server
+  compromesso.
+- Contatti cancellano: non hanno le credenziali Drive dell'owner; condividere quel potere riapre il
+  problema (chi può cancellare può sabotare).
+- TTL nativo Drive: non affidabile, dipende dall'account owner attivo.
+- Ruotare la chiave: protetta da Shamir distribuito, nessun punto centrale può ruotarla senza il
+  quorum (= il rilascio stesso).
+TENSIONE: la forward secrecy richiede che qualcuno possa distruggere il blob nel futuro; il design
+nega a chiunque potere unilaterale sui dati. Ogni meccanismo di cancellazione dà anche il potere di
+sabotare la consegna (lo scopo primario). Tensione secondaria: il blocco ricezione consente accesso
+tardivo dei contatti; cancellare presto taglia fuori i tardivi, e un blob cancellato è
+irrecuperabile.
+DECISIONE: accettato come trade-off strutturale. Il sistema privilegia la consegna affidabile sulla
+forward secrecy — scelta difendibile per un dead-man's switch. Difesa primaria: Shamir k-quorum
+(serve comunque k quote per decifrare qualsiasi copia). Forward secrecy vera = modello di consegna
+diverso (riprogettazione), da valutare all'audit.
 
 ### 10.13 Punti minori
 - `to_hash` usa il literal `'salt::'` come pseudo-salt (`pairing.ts:98`): nome fuorviante, nessuna

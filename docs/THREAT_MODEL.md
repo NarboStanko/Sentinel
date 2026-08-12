@@ -44,7 +44,7 @@ Caso d'uso di riferimento: una persona che detiene informazioni la cui pubblicaz
 
 **Scenario:** l'attaccante ha controllo in scrittura e vuole alterare la storia: cancellare eventi, inventarne, riordinarli.
 
-**Copertura:** catena di hash firmata (`audit_chain`). Ogni evento contiene l'hash del precedente; l'hash copre `chain_owner_id ‖ chain_index ‖ event_type ‖ actor_id ‖ canonical(payload) ‖ timestamp_ms ‖ signature ‖ prev_hash`. Le azioni dell'utente portano la firma P-256 dell'attore, che il server non può falsificare non avendo la chiave privata.
+**Copertura:** catena di hash con eventi utente firmati (`audit_chain`). Ogni evento contiene l'hash del precedente; l'hash copre `chain_owner_id ‖ chain_index ‖ event_type ‖ actor_id ‖ canonical(payload) ‖ timestamp_ms ‖ signature ‖ prev_hash`. Le azioni dell'utente portano la firma P-256 dell'attore, che il server non può falsificare non avendo la chiave privata.
 
 L'utente può salvare un *anchor* (hash dell'ultimo evento della propria catena) fuori dal sistema, e in seguito verificare che la catena ricostruita dal server corrisponda.
 
