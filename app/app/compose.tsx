@@ -264,7 +264,7 @@ export default function Compose() {
   const unverifiedChosen = contacts.filter(c => chosen.has(c.id) && !verifiedKeys.has(c.public_key));
   const kError: string | null =
     unverifiedChosen.length > 0
-      ? `${unverifiedChosen.length} destinatario${unverifiedChosen.length > 1 ? 'i' : ''} selezionato${unverifiedChosen.length > 1 ? 'i' : ''} ${unverifiedChosen.length > 1 ? 'hanno chiave' : 'ha la chiave'} non verificata di persona. Ripeti il pairing prima di armare.`
+      ? `${unverifiedChosen.length} destinatario${unverifiedChosen.length > 1 ? 'i' : ''} selezionato${unverifiedChosen.length > 1 ? 'i non sono verificati' : ' non è verificato'} di persona su questo dispositivo. La verifica resta sul telefono su cui l'hai fatta: se hai cambiato dispositivo o recuperato l'account, incontra di persona ${unverifiedChosen.length > 1 ? 'i contatti per ri-verificarli' : 'il contatto per ri-verificarlo'} prima di includerl${unverifiedChosen.length > 1 ? 'i' : 'o'}.`
       : kNum < 2
         ? 'Un solo approvatore può rilasciare da solo: scegli almeno 2.'
         : kNum > N

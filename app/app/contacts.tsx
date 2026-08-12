@@ -276,6 +276,19 @@ export default function Contacts() {
         })
       )}
 
+      {/* Banner informativo: con 1 solo contatto il quorum di recovery è 1 —
+          quella persona può approvare la rotazione dell'identità da sola. */}
+      {contacts.length === 1 && (
+        <Card tone="heartbeat">
+          <Text style={T.label}>UN SOLO CONTATTO FIDATO</Text>
+          <Text style={[T.dim, { marginTop: space(1) }]}>
+            Con un solo contatto, il recovery dell'identità può essere approvato da quella
+            persona da sola. Aggiungi almeno un altro contatto fidato: da 2 in su serve
+            un quorum, ed è molto più difficile abusarne.
+          </Text>
+        </Card>
+      )}
+
       {/* ── Sezione: sono contatto di... ─────────────────────────────────────── */}
       {myPairings.length > 0 && (
         <>
