@@ -1,184 +1,91 @@
 # Sentinella
 
-Un *dead man's switch* civico, end-to-end encrypted. Ogni X la Sentinella chiede «tutto ok?».
-Se smetti di rispondere (arresto, sparizione), parte una richiesta di rilascio verso i tuoi
-contatti fidati: quando almeno **k** di loro approvano, la documentazione preparata a freddo
-viene decifrata e consegnata.
+Un *dead man's switch* civico, cifrato end-to-end. A intervalli regolari la Sentinella chiede «tutto ok?». Se l'utente smette di rispondere (arresto, sparizione, incapacità), parte una richiesta di rilascio verso i suoi contatti fidati: quando almeno **k** di loro approvano, la documentazione preparata a freddo viene decifrata e consegnata.
 
-Questo repo è uno **scaffold** completo e coerente, pensato per essere aperto e completato in
-**Claude Code**. Le parti critiche (crittografia, scheduler, pairing, push) sono implementate;
-alcune schermate sono intenzionalmente minime e marcate `TODO` per essere rifinite.
+Pensato per giornalisti, attivisti e chiunque debba garantire che informazioni sensibili emergano se gli accade qualcosa — senza affidare quelle informazioni a nessun intermediario in chiaro.
 
 ---
 
-## Principi non negoziabili
+## ⚠️ Stato del progetto — leggere prima di usare
 
-1. **Zero-knowledge.** Il server non vede mai i contenuti né le chiavi per decifrarli. Conserva
-   solo: chiavi pubbliche, push token, puntatori al drive, **quote cifrate** della chiave, e stato.
-2. **Soglia k-su-N.** La chiave del pacchetto (DEK) è spezzata con Shamir. Nessun singolo
-   contatto — e nessun server sequestrato — può rilasciare da solo. Consigliato: 2-su-5 o 3-su-7.
-3. **Identità da seed phrase.** Le chiavi nascono da 12 parole BIP39, derivate in modo
-   deterministico. Stesse parole → stessa chiave su qualunque OS. Migrazione Android↔iPhone gratis.
-4. **Pairing di persona.** I contatti si aggiungono scansionando un QR faccia a faccia
-   (verifica out-of-band): nessun man-in-the-middle possibile.
-5. **Il battito sta sul server.** Su mobile i timer in background non sono affidabili: è il
-   backend a tenere il "visto l'ultima volta", a mandare la push «tutto ok?» e a scatenare
-   l'escalation. L'app deve solo *reagire alle push*.
-6. **Le push non contengono segreti.** Apple/Google vedono passare le notifiche → nel payload
-   ci va solo «apri l'app». La quota cifrata da approvare si scarica su TLS e si decifra sul device.
-7. **I file cifrati vivono su un drive esterno** scelto dall'utente; il server tiene solo il link.
+**Sentinella NON è ancora stato sottoposto a un audit di sicurezza indipendente e NON deve essere usato per proteggere persone in situazioni di rischio reale finché non lo sarà.**
+
+Il sistema è funzionante end-to-end ed è stato sottoposto a un audit interno approfondito (vedi `docs/`), ma un audit interno non sostituisce la revisione di esperti esterni. Finché non c'è quella revisione e un deploy di produzione con HTTPS, considerare questo software un **prototipo avanzato**, non uno strumento di protezione affidabile.
+
+Stato sintetico:
+- Funzionalità core: **completa e testata end-to-end** (su dispositivi fisici).
+- Audit interno: **critici e alti risolti**, medi risolti o chiariti (vedi `docs/FINDINGS_TRIAGE.md`).
+- Audit professionale esterno: **non ancora fatto** (previsto).
+- Deploy di produzione (HTTPS/VPS): **non ancora fatto** (oggi gira su HTTP in LAN per sviluppo).
 
 ---
 
-## Mi serve un Mac per fare l'app iPhone?
+## Modello di sicurezza (in breve)
 
-**No, non per forza.** Con Expo EAS Build le build iOS girano nel cloud macOS di Expo e si
-lanciano da Windows/Linux; EAS Submit carica le build iOS allo store anche da non-Mac.
+- **End-to-end**: il contenuto è cifrato sul dispositivo dell'utente. Il server custodisce solo blob opachi e non può leggerli.
+- **Il server non conosce la soglia `k`**: la soglia di quorum per il rilascio è privata al client. Il server raccoglie quote opache (reali + esche indistinguibili) e non sa quante ne servano.
+- **Segretezza condivisa (Shamir)**: la chiave di decifratura è divisa in quote distribuite ai contatti; servono almeno `k` quote per ricostruirla.
+- **Verifica di persona (safety number)**: il pairing tra utente e contatto è confermato di persona (parole BIP39), a difesa da attacchi man-in-the-middle. La verifica è locale al dispositivo e non si trasferisce a un dispositivo nuovo (proprietà voluta).
+- **Duress PIN**: un PIN di emergenza attiva una facciata o un trigger silenzioso, indistinguibile dall'esterno.
+- **Recupero dell'identità**: restore da seed phrase (se conservata) oppure social recovery (rotazione della chiave sotto quorum di contatti + ritardo obbligatorio + possibilità di annullamento).
 
-Però:
-- Serve un **account Apple Developer a pagamento** (99 $/anno) per ogni build che gira su un
-  iPhone fisico e per TestFlight/App Store. Non aggirabile.
-- L'unico percorso che *richiede* un Mac è la build locale senza account a pagamento.
-- Android non richiede nulla di Apple.
-- Un Mac resta comodo (simulatore iOS, debug nativo) ma non è un prerequisito.
+Dettagli completi nei documenti di `docs/` (vedi sotto).
 
 ---
 
-## Struttura
+## Architettura
 
+- **App** (`app/`): React Native / Expo. Crittografia con `@noble` (curves, ciphers, hashes), storage sicuro via SecureStore/Keystore.
+- **Server** (`server/`): Node.js / Fastify + SQLite. Autenticazione passwordless a firma per-richiesta (challenge-response P-256). Custodisce blob opachi e coordina il flusso, senza accesso ai contenuti né alla soglia.
+
+Flusso: check-in → (mancata risposta) → grace → APPROVAL_PENDING → raccolta quote dai contatti → RELEASED → i contatti che hanno contribuito decifrano e conservano il contenuto.
+
+---
+
+## Documentazione (`docs/`)
+
+- `THREAT_MODEL.md` — attori, minacce coperte e non coperte, scelte di design.
+- `DESIGN_DECISIONS.md` — decisioni architetturali con motivazioni.
+- `CRYPTO_INVENTORY.md` — primitive crittografiche in uso.
+- `FINDINGS_TRIAGE.md` — trovamenti dell'audit interno e stato.
+- `RECOVERY_MODEL.md` — modello di recupero dell'identità (restore vs social recovery), analisi e decisioni.
+- `C1_ESITO.md` / `PIANO_C1.md` — indagine sulla KDF dei PIN (richiede modulo nativo; rimandato all'audit).
+- `AUDIT_PROMPTS.md` — prompt avversariali per la revisione.
+- `REVIEWER_README.md` — guida per il revisore esterno.
+
+---
+
+## Sviluppo
+
+**Server:**
 ```
-sentinella/
-  server/   API "postino" + scheduler (Node + TypeScript + Fastify + SQLite)
-  app/      App mobile (Expo / React Native, un solo codice per iOS e Android)
-```
-
-### server/
-| File | Ruolo |
-|------|------|
-| `src/index.ts` | bootstrap Fastify, registra le route |
-| `src/db.ts` | schema SQLite + helper (zero plaintext) |
-| `src/routes/pairing.ts` | invito + accoppiamento di persona |
-| `src/routes/switch.ts` | crea / arma / disarma / configura lo switch |
-| `src/routes/checkin.ts` | heartbeat: «tutto ok» |
-| `src/routes/vault.ts` | salva puntatore drive + quote cifrate (mai contenuto) |
-| `src/routes/approvals.ts` | raccolta approvazioni a soglia |
-| `src/services/scheduler.ts` | **il battito**: tick periodico, escalation, trigger |
-| `src/services/pushSender.ts` | invio push via Expo (nessun segreto nel payload) |
-
-### app/
-| File | Ruolo |
-|------|------|
-| `lib/crypto.ts` | **il cuore**: identità da BIP39, ECDH seal/open, Shamir k-su-N |
-| `lib/keystore.ts` | custodia chiave privata (Keychain/Keystore via expo-secure-store) |
-| `lib/api.ts` | client REST verso il server |
-| `theme.ts` | design tokens (palette calma, superfici pulite) |
-| `app/index.tsx` | onboarding: crea identità + mostra seed |
-| `app/home.tsx` | dashboard battito: stato + «tutto ok» |
-| `app/contacts.tsx` | lista contatti + aggiungi amico |
-| `app/add-friend.tsx` | mostra QR / scansiona QR (pairing di persona) |
-| `app/compose.tsx` | messaggio + allegati + soglia, cifra e arma |
-| `app/approve.tsx` | schermata di approvazione per i contatti |
-
----
-
-## Setup rapido
-
-### Server
-```bash
 cd server
 npm install
-npm run dev          # http://localhost:4000  (SQLite, zero config)
+npm run dev        # avvia su :4000
 ```
+Test (suite separate): `npm run test:auth`, `test:switch`, `test:scheduler`, `test:duress`, `test:ratelimit`, `test:routes`, `test:contacts`, `test:audit_chain`, `test:push`, ecc.
 
-### App
-```bash
+**App:**
+```
 cd app
 npm install
-npx expo start       # apri con Expo Go (Android/iOS) per sviluppare
+npx expo start --dev-client
 ```
-Imposta l'URL del server in `app/lib/api.ts` (default `http://localhost:4000`; su device fisico
-usa l'IP del tuo computer, non `localhost`).
+
+I segreti (chiavi, `.env`, DB) sono esclusi dal versionamento (vedi `.gitignore`). Il DB viene creato al primo avvio del server.
 
 ---
 
-## Da fare con Claude Code (playbook)
+## Cosa resta
 
-Apri il repo in Claude Code e procedi così, una fetta per volta:
-
-1. **Crypto prima di tutto.** Chiedi a Claude Code di scrivere test per `app/lib/crypto.ts`:
-   round-trip seal/open, split/combine Shamir con k quote, derivazione deterministica
-   (stesse 12 parole → stessa chiave pubblica). Non procedere finché i test non passano.
-2. **Pairing.** Completa `add-friend.tsx`: generazione QR (libreria `react-native-qrcode-svg`)
-   e scanner (`expo-camera`). Verifica che dopo lo scan entrambi abbiano la chiave dell'altro.
-3. **Push reali.** Crea il progetto Firebase (FCM), configura `expo-notifications`, registra il
-   token in `/push/register`. Testa con `pushSender.ts` (parte in modalità log finché non metti le credenziali).
-4. **Scheduler.** Verifica il ciclo in `scheduler.ts`: check-in → grace → APPROVAL_PENDING →
-   raccolta quote → RELEASED. Abbassa gli intervalli a pochi secondi per testare.
-5. **Drive esterno.** Implementa l'upload OAuth verso Google Drive (o S3) in un modulo `lib/drive.ts`;
-   il server deve ricevere **solo il puntatore**.
-6. **Rifinitura UI.** Completa `compose.tsx` (file picker via `expo-document-picker` /
-   `expo-image-picker`) e lo stile delle schermate seguendo `theme.ts`.
-7. **Hardening.** Sposta la chiave privata nel Secure Enclave/StrongBox dove possibile, tieni il
-   seed come solo percorso di recupero; aggiungi rate-limiting e audit log firmato lato server.
-
-> ⚠️ Questo scaffold dimostra l'architettura corretta. Prima di affidargli vite reali serve un
-> audit di sicurezza indipendente, librerie crypto auditate, e un threat model formale
-> (coercizione, sequestro del device, occultamento completo dei metadata).
+- Audit di sicurezza professionale indipendente (candidatura prevista, es. OTF Security Lab).
+- KDF dei PIN con modulo nativo (Argon2id) — vedi `docs/C1_ESITO.md`.
+- Deploy di produzione con HTTPS.
+- Trovamenti minori aperti per l'audit: naming audit log (M4), P-256 nella console web (M5), forward secrecy dei blob su Drive (M6).
+- Sottosistema attuatori (fase successiva, dopo l'audit).
 
 ---
 
-## Aggiornamento: recovery via browser + occultamento metadata
+## Licenza
 
-### web/ — console di recupero
-`web/recovery-console.html` è una pagina autonoma: la apri da qualsiasi browser, inserisci la
-**seed phrase**, e riprendi il controllo dello switch (tutto ok / blocca / disarma). Funziona
-perché l'identità è ri-derivata dalle 12 parole: nessun account da recuperare.
-
-Autenticazione **passwordless a firma** (niente password sul server):
-1. il client deriva la chiave dalla seed (in locale, le parole non lasciano la pagina);
-2. chiede una sfida (`/auth/challenge`) e la firma (ECDSA P-256);
-3. il server verifica la firma contro la chiave pubblica nota (`/auth/verify`) e apre una sessione.
-
-> Verificato in test: la console deriva **la stessa chiave** dell'app, e la firma del browser
-> è validata lato server con `@noble`.
-
-Caso peggiore (persa anche la seed) → **recovery sociale**, ancora da progettare con cura:
-deve poter solo mettere in pausa/proteggere (direzione *fail-safe*), mai ricreare contenuti, e
-restare separato dalle quote di rilascio, perché un recovery che disarma è anche un'arma di coercizione.
-
-### Occultamento dei metadata
-Il server **non** sa più quale quota appartenga a quale contatto, né quante quote reali esistano:
-- le quote sono **blob opachi**; tra quelle reali sono mescolate delle **esche** indistinguibili,
-  fino a un totale fisso (default 8) → il server non conosce N reale né, di fatto, k;
-- al rilascio il contatto scarica **tutti** i blob (`/shares`) e trova il proprio per
-  **trial decryption** (prova ad aprirli con la sua chiave privata) → il server non vede la mappa
-  contatto↔quota;
-- la tabella `shares` non contiene più `contact_id`.
-
-Resta da fare per l'occultamento completo: scorrelare i push token dall'appartenenza alle quote,
-nascondere anche `k`, attenuare il pattern temporale dei check-in, e (per i casi estremi) consegna
-anonima via Tor/onion.
-
-### Test crypto inclusi
-`app/lib/crypto.test.ts` copre: derivazione deterministica (migrazione OS), seal/open ECDH,
-Shamir k-su-N, trial decryption con esche. Esegui con `cd app && npm run test:crypto`.
-
----
-
-## Aggiornamento 2: recovery sociale + occultamento (ultimo miglio)
-
-**Soglia k nascosta al server.** Il server non riceve più `k`: resta solo lato client (serve a
-`splitSecret`). Il contatto che approva ricombina le quote raccolte e prova a decifrare il contenuto;
-se decifra, la soglia è raggiunta e conferma il rilascio (`/release/confirm`). Il server non sa quante
-quote servano.
-
-**Jitter sui check-in.** `next_check_at` ha un jitter ±15% (`withJitter`), così il ritmo dei
-controlli non è un orologio leggibile dal server. (Mitigazione parziale: l'occultamento temporale
-completo richiede logica client-side / cover traffic.)
-
-**Recovery sociale fail-safe** (`server/src/routes/recovery.ts`): un quorum di contatti, dopo un
-ritardo obbligatorio, può solo **ruotare la chiave pubblica** del proprietario (nuova seed su nuovo
-device). Non disarma, non rilascia; lo switch continua a girare; bloccato se un rilascio è in corso;
-annullabile da chi possiede ancora la chiave attuale (`/recovery/cancel`). Quorum `recovery_k` sul record utente.
-
-Vedi `PROMPT-CLAUDE-CODE.md` per il brief operativo completo.
+_(da definire)_

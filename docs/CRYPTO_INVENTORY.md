@@ -30,7 +30,7 @@ separati per `app/` e `server/`).
 
 Note:
 - `expo-crypto` (`~13.0.2`) è **dichiarata ma mai importata** nel codice applicativo (dipendenza morta).
-- In `app/package.json:46` compare una dipendenza anomala `"undefined": "C:\\claude\\killswitch\\sentinella\\sentinella"` — refuso da ripulire, non crittografico ma indice di igiene del manifest.
+- (RISOLTO) In `app/package.json` era presente una dipendenza malformata con chiave `undefined` e un path assoluto locale come valore. Rimossa: esponeva un percorso del filesystem dello sviluppatore e poteva rompere `npm install`.
 - La console web `web/recovery-console.html` non usa librerie: P-256 è **reimplementata a mano in BigInt** (vedi §10).
 
 ---
@@ -344,12 +344,11 @@ futuro + blob archiviato = rilascio), e i pattern di accesso a Drive sono visibi
   esplicito/contesto per-messaggio sarebbe più robusto.
 - Nessuna AAD in alcun AEAD: i blob non sono legati crittograficamente a switch/contesto
   (es. una quota sigillata potrebbe essere ripresentata su un altro switch dello stesso owner).
-- `expo-crypto` dipendenza dichiarata e mai usata; `"undefined": "C:\\claude\\…"` in
-  `app/package.json:46`.
+- `expo-crypto` dipendenza dichiarata e mai usata.
 - Lockfile unico alla radice: `server/` non ha un lockfile proprio — verificare che il deploy del
   server usi versioni bloccate delle librerie crypto.
 - La seed resta leggibile in SecureStore (nessuna chiave hardware non-esportabile); il claim
-  «Secure Enclave/StrongBox» in `keystore.ts:1-3` e nel task 7 del CLAUDE.md è a oggi solo un commento.
+  «Secure Enclave/StrongBox» in `keystore.ts:1-3` e nel piano di sviluppo è a oggi solo un commento.
 
 ---
 

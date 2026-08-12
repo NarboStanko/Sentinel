@@ -90,6 +90,6 @@ Su dispositivo reale, con Metro:
 
 Solo quando tutti questi passano, C1 è chiuso. Poi commit + aggiornare FINDINGS_TRIAGE (C1 fatto).
 
-## Prompt per Claude Code (usare a mente fresca)
+## Prompt di implementazione (usare a mente fresca)
 
 Da scrivere all'inizio della sessione fresca, con lo stop in cima. NON darlo di corsa: prima far misurare i parametri scrypt sul telefono, poi decidere la strategia di migrazione, POI implementare.

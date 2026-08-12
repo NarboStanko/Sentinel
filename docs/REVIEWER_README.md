@@ -279,7 +279,7 @@ in particolare i critici C1 (PIN con SHA-256 singola), C2 (esche distinguibili d
 indici), C3 (il server apprende k via `recoveryK`, in tensione con l'invariante dichiarata).
 
 **Prima dell'uso reale** il progetto stesso dichiara necessari: audit indipendente, threat
-model formale completo e revisione legale (vedi `README.md` di radice e `CLAUDE.md`).
+model formale completo e revisione legale (vedi `README.md` di radice).
 
 ---
 
