@@ -88,4 +88,6 @@ I segreti (chiavi, `.env`, DB) sono esclusi dal versionamento (vedi `.gitignore`
 
 ## Licenza
 
-_(da definire)_
+Sentinella è rilasciata sotto GNU Affero General Public License v3.0 (AGPL-3.0). Vedi il file LICENSE.
+
+Il copyright è detenuto dall'autore (NarboStanko). Questo consente, in futuro, versioni con feature aggiuntive o servizi gestiti a supporto della sostenibilità del progetto, mantenendo il core libero e verificabile.
