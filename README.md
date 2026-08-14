@@ -1,69 +1,73 @@
 # Sentinella
 
-Un *dead man's switch* civico, cifrato end-to-end. A intervalli regolari la Sentinella chiede «tutto ok?». Se l'utente smette di rispondere (arresto, sparizione, incapacità), parte una richiesta di rilascio verso i suoi contatti fidati: quando almeno **k** di loro approvano, la documentazione preparata a freddo viene decifrata e consegnata.
+> 🇬🇧 English · [🇮🇹 Italiano](README.it.md)
 
-Pensato per giornalisti, attivisti e chiunque debba garantire che informazioni sensibili emergano se gli accade qualcosa — senza affidare quelle informazioni a nessun intermediario in chiaro.
+A civic *dead man's switch*, end-to-end encrypted. At regular intervals, Sentinella asks "everything OK?". If the user stops responding (arrest, disappearance, incapacitation), a release request goes out to their trusted contacts: once at least **k** of them approve, the documentation prepared in advance is decrypted and delivered.
 
----
-
-## ⚠️ Stato del progetto — leggere prima di usare
-
-**Sentinella NON è ancora stato sottoposto a un audit di sicurezza indipendente e NON deve essere usato per proteggere persone in situazioni di rischio reale finché non lo sarà.**
-
-Il sistema è funzionante end-to-end ed è stato sottoposto a un audit interno approfondito (vedi `docs/`), ma un audit interno non sostituisce la revisione di esperti esterni. Finché non c'è quella revisione e un deploy di produzione con HTTPS, considerare questo software un **prototipo avanzato**, non uno strumento di protezione affidabile.
-
-Stato sintetico:
-- Funzionalità core: **completa e testata end-to-end** (su dispositivi fisici).
-- Audit interno: **critici e alti risolti**, medi risolti o chiariti (vedi `docs/FINDINGS_TRIAGE.md`).
-- Audit professionale esterno: **non ancora fatto** (previsto).
-- Deploy di produzione (HTTPS/VPS): **non ancora fatto** (oggi gira su HTTP in LAN per sviluppo).
+Designed for journalists, activists, and anyone who needs to ensure that sensitive information surfaces if something happens to them — without entrusting that information to any intermediary in the clear.
 
 ---
 
-## Modello di sicurezza (in breve)
+## ⚠️ Project status — read before using
 
-- **End-to-end**: il contenuto è cifrato sul dispositivo dell'utente. Il server custodisce solo blob opachi e non può leggerli.
-- **Il server non conosce la soglia `k`**: la soglia di quorum per il rilascio è privata al client. Il server raccoglie quote opache (reali + esche indistinguibili) e non sa quante ne servano.
-- **Segretezza condivisa (Shamir)**: la chiave di decifratura è divisa in quote distribuite ai contatti; servono almeno `k` quote per ricostruirla.
-- **Verifica di persona (safety number)**: il pairing tra utente e contatto è confermato di persona (parole BIP39), a difesa da attacchi man-in-the-middle. La verifica è locale al dispositivo e non si trasferisce a un dispositivo nuovo (proprietà voluta).
-- **Duress PIN**: un PIN di emergenza attiva una facciata o un trigger silenzioso, indistinguibile dall'esterno.
-- **Recupero dell'identità**: restore da seed phrase (se conservata) oppure social recovery (rotazione della chiave sotto quorum di contatti + ritardo obbligatorio + possibilità di annullamento).
+**Sentinella has NOT yet undergone an independent security audit and MUST NOT be used to protect people in situations of real risk until it has.**
 
-Dettagli completi nei documenti di `docs/` (vedi sotto).
+The system is functional end-to-end and has undergone a thorough internal audit (see `docs/`), but an internal audit is no substitute for external expert review. Until that review and a production deployment over HTTPS are in place, treat this software as an **advanced prototype**, not a reliable protection tool.
 
----
-
-## Architettura
-
-- **App** (`app/`): React Native / Expo. Crittografia con `@noble` (curves, ciphers, hashes), storage sicuro via SecureStore/Keystore.
-- **Server** (`server/`): Node.js / Fastify + SQLite. Autenticazione passwordless a firma per-richiesta (challenge-response P-256). Custodisce blob opachi e coordina il flusso, senza accesso ai contenuti né alla soglia.
-
-Flusso: check-in → (mancata risposta) → grace → APPROVAL_PENDING → raccolta quote dai contatti → RELEASED → i contatti che hanno contribuito decifrano e conservano il contenuto.
+Status at a glance:
+- Core functionality: **complete and tested end-to-end** (on physical devices).
+- Internal audit: **critical and high findings resolved**, medium findings resolved or clarified (see `docs/FINDINGS_TRIAGE.md`).
+- External professional audit: **not yet done** (planned).
+- Production deployment (HTTPS/VPS): **not yet done** (currently runs over HTTP on a LAN for development).
 
 ---
 
-## Documentazione (`docs/`)
+## Security model (in brief)
 
-- `THREAT_MODEL.md` — attori, minacce coperte e non coperte, scelte di design.
-- `DESIGN_DECISIONS.md` — decisioni architetturali con motivazioni.
-- `CRYPTO_INVENTORY.md` — primitive crittografiche in uso.
-- `FINDINGS_TRIAGE.md` — trovamenti dell'audit interno e stato.
-- `RECOVERY_MODEL.md` — modello di recupero dell'identità (restore vs social recovery), analisi e decisioni.
-- `C1_ESITO.md` / `PIANO_C1.md` — indagine sulla KDF dei PIN (richiede modulo nativo; rimandato all'audit).
-- `AUDIT_PROMPTS.md` — prompt avversariali per la revisione.
-- `REVIEWER_README.md` — guida per il revisore esterno.
+- **End-to-end**: content is encrypted on the user's device. The server holds only opaque blobs and cannot read them.
+- **The server does not know the threshold `k`**: the quorum threshold for release is private to the client. The server collects opaque shares (real ones plus indistinguishable decoys) and does not know how many are required.
+- **Secret sharing (Shamir)**: the decryption key is split into shares distributed to contacts; at least `k` shares are needed to reconstruct it.
+- **In-person verification (safety number)**: pairing between user and contact is confirmed in person (BIP39 words), defending against man-in-the-middle attacks. Verification is local to the device and does not transfer to a new device (intended property).
+- **Duress PIN**: an emergency PIN triggers a decoy facade or a silent trigger, indistinguishable from the outside.
+- **Identity recovery**: restore from seed phrase (if kept) or social recovery (key rotation under a contact quorum + mandatory delay + ability to cancel).
+
+Full details in the documents under `docs/` (see below).
 
 ---
 
-## Sviluppo
+## Architecture
+
+- **App** (`app/`): React Native / Expo. Cryptography via `@noble` (curves, ciphers, hashes), secure storage via SecureStore/Keystore.
+- **Server** (`server/`): Node.js / Fastify + SQLite. Passwordless per-request signature authentication (P-256 challenge–response). Holds opaque blobs and coordinates the flow, with no access to content or to the threshold.
+
+Flow: check-in → (no response) → grace → APPROVAL_PENDING → collection of shares from contacts → RELEASED → the contributing contacts decrypt and keep the content.
+
+---
+
+## Documentation (`docs/`)
+
+- `THREAT_MODEL.md` — actors, threats covered and not covered, design choices.
+- `DESIGN_DECISIONS.md` — architectural decisions with rationale.
+- `CRYPTO_INVENTORY.md` — cryptographic primitives in use.
+- `FINDINGS_TRIAGE.md` — internal audit findings and their status.
+- `RECOVERY_MODEL.md` — identity recovery model (restore vs. social recovery), analysis and decisions.
+- `C1_ESITO.md` / `PIANO_C1.md` — investigation into the PIN KDF (requires a native module; deferred to the audit).
+- `AUDIT_PROMPTS.md` — adversarial prompts for review.
+- `REVIEWER_README.md` — guide for the external reviewer.
+
+Note: the English versions are authoritative. Italian translations may lag behind.
+
+---
+
+## Development
 
 **Server:**
 ```
 cd server
 npm install
-npm run dev        # avvia su :4000
+npm run dev        # starts on :4000
 ```
-Test (suite separate): `npm run test:auth`, `test:switch`, `test:scheduler`, `test:duress`, `test:ratelimit`, `test:routes`, `test:contacts`, `test:audit_chain`, `test:push`, ecc.
+Tests (separate suites): `npm run test:auth`, `test:switch`, `test:scheduler`, `test:duress`, `test:ratelimit`, `test:routes`, `test:contacts`, `test:audit_chain`, `test:push`, etc.
 
 **App:**
 ```
@@ -72,22 +76,22 @@ npm install
 npx expo start --dev-client
 ```
 
-I segreti (chiavi, `.env`, DB) sono esclusi dal versionamento (vedi `.gitignore`). Il DB viene creato al primo avvio del server.
+Secrets (keys, `.env`, DB) are excluded from version control (see `.gitignore`). The DB is created on the server's first run.
 
 ---
 
-## Cosa resta
+## What's left
 
-- Audit di sicurezza professionale indipendente (candidatura prevista, es. OTF Security Lab).
-- KDF dei PIN con modulo nativo (Argon2id) — vedi `docs/C1_ESITO.md`.
-- Deploy di produzione con HTTPS.
-- Trovamenti minori aperti per l'audit: naming audit log (M4), P-256 nella console web (M5), forward secrecy dei blob su Drive (M6).
-- Sottosistema attuatori (fase successiva, dopo l'audit).
+- Independent professional security audit (application planned, e.g. OTF Security Lab).
+- PIN KDF with a native module (Argon2id) — see `docs/C1_ESITO.md`.
+- Production deployment over HTTPS.
+- Minor findings open for the audit: audit-log naming (M4), hand-rolled P-256 in the web console (M5), forward secrecy of Drive blobs (M6).
+- Actuator subsystem (next phase, after the audit).
 
 ---
 
-## Licenza
+## License
 
-Sentinella è rilasciata sotto GNU Affero General Public License v3.0 (AGPL-3.0). Vedi il file LICENSE.
+Sentinella is released under the GNU Affero General Public License v3.0 (AGPL-3.0). See the LICENSE file.
 
-Il copyright è detenuto dall'autore (NarboStanko). Questo consente, in futuro, versioni con feature aggiuntive o servizi gestiti a supporto della sostenibilità del progetto, mantenendo il core libero e verificabile.
+Copyright is held by the author (NarboStanko). This allows, in the future, versions with additional features or managed services to support the project's sustainability, while keeping the core free and verifiable.
