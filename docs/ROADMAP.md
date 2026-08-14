@@ -1,50 +1,136 @@
-# Sentinella — Roadmap
+# \# Sentinella — Roadmap
 
-Stato del progetto e prossimi passi. Aggiornare man mano.
+# 
 
-## Fatto
+# Stato del progetto e prossimi passi. Aggiornare man mano.
 
-- Funzionalità core completa e testata end-to-end (su dispositivi fisici).
-- Audit interno completo: critici, alti e medi chiusi o valutati (vedi `docs/FINDINGS_TRIAGE.md`).
-  - Critici: C2, C3 risolti; C1 (KDF PIN) rimandato all'audit professionale (serve modulo nativo).
-  - Alti: A1, A2, A3 risolti e verificati.
-  - Medi: M1 risolto; M2/M3 chiariti (M3 falso allarme); M4 allineato; M5/M6 valutati e documentati come scelte/trade-off.
-- Recovery: modello analizzato e documentato (`docs/RECOVERY_MODEL.md`); Parte A (initiate), quorum dinamico, UX. La "Parte C" si è rivelata non necessaria.
-- Backup su GitHub privato (`NarboStanko/Sentinel`).
-- Repo ripulito: README allo stato reale, riferimenti agli strumenti rimossi, path locali rimossi, dipendenza spuria in package.json rimossa.
-- Fase 1 avviata: storia Git controllata; `google-services.json` (chiave Firebase client) tolto dal tracking e messo in gitignore.
+# 
 
-## Fase 1 — Rendere il codice pubblicabile (IN CORSO)
+# \## Fatto
 
-- [ ] **Licenza**: scegliere e aggiungere il file. Orientamento: AGPL-3.0 sul core (copyleft forte; copyright detenuto dall'autore → compatibile con feature premium separate / servizio gestito).
-- [ ] **Riscrittura storia Git**: rimuovere `google-services.json` dai commit passati (`git filter-repo`). IRREVERSIBILE: fare backup del repo prima, poi force-push. Da fare solo quando si è pronti a pubblicare.
-- [x] Livello C (chiave Firebase): verificato rischio basso (solo FCM gratuito). Restrizione SHA rimandata alla build di produzione.
+# 
 
-## Fase 2 — Audit professionale
+# \- Funzionalità core completa e testata end-to-end (su dispositivi fisici).
 
-- [ ] Candidare a OTF Security Lab / NLnet / Reset.tech. Dossier già pronto (`docs/`). Idealmente PRIMA dello store. Passo esterno a più alto valore.
+# \- Audit interno completo: critici, alti e medi chiusi o valutati (vedi `docs/FINDINGS\_TRIAGE.md`).
 
-## Fase 3 — Deploy produzione
+# &#x20; - Critici: C2, C3 risolti; C1 (KDF PIN) rimandato all'audit professionale (serve modulo nativo).
 
-- [ ] Server con HTTPS (VPS Hetzner + Caddy). Necessario prima dello store (l'app non può puntare al PC in LAN).
+# &#x20; - Alti: A1, A2, A3 risolti e verificati.
 
-## Fase 4 — Store
+# &#x20; - Medi: M1 risolto; M2/M3 chiariti (M3 falso allarme); M4 allineato; M5/M6 valutati e documentati.
 
-- [ ] Account developer (Google $25 una-tantum, Apple $99/anno).
-- [ ] Privacy policy + conformità GDPR (UE, dati sensibili di persone a rischio).
-- [ ] Build di produzione; registrazione SHA + restrizione chiave Firebase.
+# \- Recovery: modello analizzato e documentato; Parte A, quorum dinamico, UX.
 
-## Fase 5 — Sostenibilità
+# \- Backup su GitHub privato (`NarboStanko/Sentinel`).
 
-- [ ] Donazioni: Open Collective / GitHub Sponsors.
-- [ ] Grant: NLnet (europeo), Prototype Fund, OTF. Alcuni richiedibili prima, per finanziare il completamento.
+# \- Repo ripulito: README reale, riferimenti agli strumenti rimossi, path locali rimossi, dipendenza spuria rimossa.
 
-## Trovamenti tecnici aperti (non urgenti)
+# \- \*\*Fase 1 completata\*\*: storia Git ripulita (`google-services.json`/chiave rimossi da tutti i commit via filter-repo, force-push, tag preservati); licenza \*\*AGPL-3.0\*\* aggiunta (copyright NarboStanko); ROADMAP nel repo.
 
-- [ ] C1 — KDF dei PIN con Argon2id (modulo nativo). Decisione informata da prendere con l'audit. Vedi `docs/C1_ESITO.md`.
-- [ ] Nota produzione: cache-facciata token al bootstrap (cosmetico).
-- [ ] Nota produzione: migrazione `shares.x` nullable.
+# \- Design del sottosistema attuatori documentato (`docs/ACTUATOR\_DESIGN.md`): modello di sicurezza, UX a due livelli, firmware relè, stato di salute, modello di pagamento (licenza firmata bearer, pagamento esterno, durate 1/2/3/5 anni).
 
-## Ordine consigliato
+# \- README bilingue (EN primario + IT affiancato).
 
-Completare Fase 1 (licenza + storia pulita) → rendere pubblico il repo → candidarsi all'audit (Fase 2). Poi deploy (3), store (4), sostenibilità (5) in parallelo dove possibile.
+# 
+
+# \## Prossimo: pubblicazione open source
+
+# 
+
+# \- \[ ] \*\*Traduzione docs in inglese\*\* (Lavoro B). Fatto: README. Restano: THREAT\_MODEL, CRYPTO\_INVENTORY, FINDINGS\_TRIAGE, REVIEWER\_README, poi gli altri. Inglese primario, italiano affiancato. Necessario prima di pubblicare e candidarsi all'audit.
+
+# \- \[ ] \*\*Rendere pubblico il repo\*\* (irreversibile; a mente fresca dopo la traduzione dei doc core). Storia già pulita, licenza presente.
+
+# 
+
+# \## Audit professionale (percorso ATTIVO, non passivo)
+
+# 
+
+# L'audit serio NON capita spontaneamente perché il repo è pubblico. Si OTTIENE candidandosi.
+
+# \- \[ ] \*\*Candidatura\*\* a OTF (Security Lab) e/o NLnet (europeo). Il dossier (`docs/`, `REVIEWER\_README.md`) è già pronto e rende la candidatura forte.
+
+# \- \[ ] La visibilità del progetto (uso, stelle, community) RAFFORZA la candidatura, ma tramite la domanda, non al posto di essa.
+
+# \- \[ ] Se accettato, l'organizzazione finanzia/organizza l'audit con società specializzate (Cure53, Trail of Bits, Radically Open Security...).
+
+# 
+
+# \## Deploy produzione
+
+# 
+
+# \- \[ ] Server con HTTPS (VPS Hetzner + Caddy). Necessario prima dello store.
+
+# \- Costi stimati: \*\*\~70-100 €/anno\*\* per partire (VPS piccolo \~50-60 €/anno + dominio \~10-15 €/anno). HTTPS gratis, push FCM gratis, storage blob sul Drive dell'utente (costo zero). Il costo vero è il tempo di gestione, non le bollette.
+
+# 
+
+# \## App multilingua / i18n (Lavoro A)
+
+# 
+
+# \- \[ ] L'app oggi è \*\*monolingua italiana\*\* (stringhe hardcoded, nessun sistema i18n).
+
+# \- \[ ] Refactoring: installare i18n, estrarre le stringhe in file di traduzione, sostituire con chiavi.
+
+# \- \[ ] Priorità DOPO l'audit (il codice si stabilizza; evita di rifare l'estrazione due volte). Serve per utenti internazionali → verso lo store.
+
+# \- \[ ] Cura speciale su stringhe critiche (duress, avvisi di sicurezza).
+
+# 
+
+# \## Store
+
+# 
+
+# \- \[ ] Account developer (Google $25 una-tantum, Apple $99/anno).
+
+# \- \[ ] Privacy policy + conformità GDPR (UE, dati sensibili).
+
+# \- \[ ] Build di produzione; registrazione SHA + restrizione chiave Firebase.
+
+# 
+
+# \## Sostenibilità
+
+# 
+
+# \- \[ ] Feature premium (attuatori) come servizio, via \*\*licenza firmata bearer\*\*, pagamento esterno all'app (Monero/voucher/mail), durate 1/2/3/5 anni. Vedi `docs/ACTUATOR\_DESIGN.md` §8-9.
+
+# \- \[ ] Donazioni: Open Collective / GitHub Sponsors. Grant: NLnet, Prototype Fund, OTF.
+
+# \- Principio: core sempre gratis/self-hostable; il pagamento non è mai single-point-of-failure (switch armato resta protetto a licenza scaduta).
+
+# \- Costi vivi bassi (\~100 €/anno) → nessuna pressione a monetizzare aggressivamente.
+
+# 
+
+# \## Attuatori (dopo l'audit)
+
+# 
+
+# \- \[ ] Implementare come da `docs/ACTUATOR\_DESIGN.md`, a fasi. Rivedere il design con l'auditor prima (specie il modello di sicurezza del blob di attivazione).
+
+# \- \[ ] Punti aperti: gateway IP↔Meshtastic, modello multi-relè, stato di salute, schema dati server, revoca licenza.
+
+# 
+
+# \## Trovamenti tecnici aperti (non urgenti)
+
+# 
+
+# \- \[ ] C1 — KDF dei PIN con Argon2id (modulo nativo). Con l'audit. Vedi `docs/C1\_ESITO.md`.
+
+# \- \[ ] Note produzione: cache-facciata token al bootstrap (cosmetico); migrazione `shares.x` nullable.
+
+# 
+
+# \## Ordine consigliato
+
+# 
+
+# Traduci docs core (EN) → repo pubblico → candidatura audit → deploy HTTPS → (audit) → i18n app + store + attuatori + sostenibilità.se 2). Poi deploy (3), store (4), sostenibilità (5) in parallelo dove possibile.
+
