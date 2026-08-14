@@ -1,269 +1,271 @@
-# Sentinella — Design del sottosistema Attuatori
+# Sentinella — Actuator Subsystem Design
 
-Documento di design (su carta). Da implementare a fasi, dopo l'audit professionale (come da THREAT_MODEL). Raccoglie le decisioni prese; i punti aperti sono marcati [DA DECIDERE].
+> 🇬🇧 English · [🇮🇹 Italiano](ACTUATOR_DESIGN.it.md)
 
-## 1. Principio guida
+Design document (on paper). To be implemented in phases, after the professional audit (per THREAT_MODEL). It records the decisions made; open points are marked [TO BE DECIDED].
 
-Sentinella **consegna un segnale**, non compie azioni fisiche. Cosa fa l'attuatore col segnale è responsabilità dell'utente. Questo scarica Sentinella dalla responsabilità dell'azione fisica, massimizza la flessibilità, e riduce la superficie di codice/attacco.
+## 1. Guiding principle
 
-**Principio UX cardine:** un attuatore che l'utente crede affidabile ma non lo è, è peggio di nessun attuatore. La UX non deve vendere sicurezza: deve comunicare onestamente cosa fa e cosa no. In particolare i limiti (dipendenza da alimentazione e connettività) vanno comunicati nel flusso, non nascosti in un disclaimer.
+Sentinella **delivers a signal**; it does not perform physical actions. What the actuator does with the signal is the user's responsibility. This relieves Sentinella of responsibility for the physical action, maximizes flexibility, and reduces the code/attack surface.
 
-## 2. Modello di sicurezza (riusa il meccanismo esistente)
+**Core UX principle:** an actuator the user believes is reliable but isn't is worse than no actuator at all. The UX must not sell security: it must communicate honestly what it does and what it doesn't. In particular, the limits (dependence on power and connectivity) must be communicated within the flow, not hidden in a disclaimer.
 
-Il segnale di attivazione è **un contenuto del pacchetto come gli altri** (documenti/foto), non un canale separato:
-- È un **blob piccolo** (token ~32 byte), cifrato per la **chiave pubblica dell'attuatore**.
-- Protetto dalla **stessa soglia Shamir** dei contenuti: si sblocca solo al quorum (k contatti approvano).
-- Trasportato dal server come blob opaco (il server non lo legge né può fabbricarlo).
-- Rilasciato al `RELEASED` come gli altri contenuti.
+## 2. Security model (reuses the existing mechanism)
 
-**Proprietà risultanti:**
-- Il server non può attivare l'attuatore (non ha le quote).
-- Un singolo contatto non può attivare (serve il quorum).
-- Anche i contatti che vedono il contenuto rilasciato non possono usare il segnale (è cifrato per la chiave dell'attuatore; solo l'attuatore lo decifra).
-- Un segnale falso non contiene il token valido → l'attuatore non agisce.
-- La sicurezza dell'attivazione eredita quella del rilascio contenuti (già auditata).
+The activation signal is **a package content like any other** (documents/photos), not a separate channel:
+- It is a **small blob** (token ~32 bytes), encrypted to the **actuator's public key**.
+- Protected by the **same Shamir threshold** as the contents: it unlocks only at quorum (k contacts approve).
+- Transported by the server as an opaque blob (the server can neither read it nor forge it).
+- Released at `RELEASED` like the other contents.
 
-## 3. Trasporto
+**Resulting properties:**
+- The server cannot activate the actuator (it does not have the shares).
+- A single contact cannot activate it (the quorum is required).
+- Even contacts who see the released content cannot use the signal (it is encrypted to the actuator's key; only the actuator can decrypt it).
+- A forged signal does not contain the valid token → the actuator does not act.
+- The security of activation inherits that of content release (already audited).
 
-- **Caso base: IP polling.** Il server ha IP fisso; è l'**attuatore a interrogare il server** ("c'è il mio blob? lo switch è RELEASED?"). Il server risponde col blob solo a stato `RELEASED` (stesso gate dei contatti). L'attuatore decifra con la sua chiave privata, verifica, agisce.
-- Il trasporto è **pluggabile**. Essendo il segnale piccolo (~32 byte), è trasportabile anche su **Meshtastic (LoRa mesh)** per scenari anti-censura (blackout di internet). Gateway IP↔mesh [DA DECIDERE, fase successiva].
+## 3. Transport
 
-**Nota sul polling (onesta):** un ESP32 dedicato in polling è robusto nel caso normale — riconnessione wifi automatica, consumo bassissimo, dispositivo mono-funzione. I punti deboli reali: (a) black-out elettrico prolungato → mitigabile con UPS/batteria; (b) riavvio rete → non è un problema, si riconnette; (c) infrastruttura sequestrata/spenta quando l'utente sparisce → NON risolvibile via firmware, è il paradosso del dead-man's switch sull'hardware; qui la risposta è Meshtastic e/o posizionare il dispositivo altrove (es. da un contatto). Da documentare come limite.
+- **Base case: IP polling.** The server has a fixed IP; it is the **actuator that queries the server** ("is my blob there? is the switch RELEASED?"). The server responds with the blob only when the state is `RELEASED` (the same gate as for contacts). The actuator decrypts with its private key, verifies, acts.
+- Transport is **pluggable**. Since the signal is small (~32 bytes), it can also be transported over **Meshtastic (LoRa mesh)** for anti-censorship scenarios (internet blackout). IP↔mesh gateway [TO BE DECIDED, later phase].
 
-## 4. UX — due livelli
+**Note on polling (honest):** a dedicated ESP32 doing polling is robust in the normal case — automatic wifi reconnection, very low power consumption, single-purpose device. The real weak points: (a) prolonged power blackout → mitigable with a UPS/battery; (b) network restart → not a problem, it reconnects; (c) infrastructure seized/shut down when the user disappears → NOT solvable in firmware; it is the dead man's switch paradox applied to hardware. Here the answer is Meshtastic and/or placing the device elsewhere (e.g. at a contact's). To be documented as a limitation.
 
-### Percorso base guidato ("Collega un attuatore")
-Per utenti ragionevolmente capaci (sanno usare un cavo USB, seguire istruzioni), senza programmare. Deve portare a un attuatore FUNZIONANTE, non a un assaggio.
+## 4. UX — two levels
 
-Flusso wizard:
-1. **Cosa serve** — onesto: ESP32, cavo, ~15 min. "Riceve un segnale quando lo switch scatta; cosa fa lo decidi tu." + limite dichiarato subito ("funziona solo se resta alimentato e connesso").
-2. **Firmware pronto** — firmware precompilato per relè, flashabile senza toolchain (idealmente flasher web via USB, tipo ESP Web Tools). Vedi §5.
-3. **Accoppiamento** — l'ESP32 genera la sua coppia di chiavi e mostra la pubblica (display / access point con paginetta / QR). L'app la registra. Stesso pattern del pairing contatti.
-4. **Test** — pulsante "prova l'attuatore": manda un segnale di TEST (non un rilascio vero), l'utente vede il relè scattare e conferma che funziona. Essenziale.
-5. **Stato** — l'attuatore appare in lista col suo stato di salute (§6).
+### Guided base path ("Connect an actuator")
+For reasonably capable users (they can use a USB cable and follow instructions), without programming. It must lead to a WORKING actuator, not to a teaser.
 
-### Livello avanzato
-Per chi scrive il proprio firmware. Si fornisce:
-- Specifica del protocollo (endpoint polling, formato blob, come decifrare/verificare il token con la chiave dell'attuatore).
-- Libreria/SDK di riferimento (codice di verifica del segnale da integrare).
-- Opzioni di trasporto (IP polling ora, Meshtastic in futuro).
-- Controllo totale su cosa fare dopo la verifica.
+Wizard flow:
+1. **What you need** — honest: ESP32, cable, ~15 min. "It receives a signal when the switch fires; what it does is up to you." + the limit stated up front ("it only works while it stays powered and connected").
+2. **Ready-made firmware** — precompiled relay firmware, flashable without a toolchain (ideally a web flasher over USB, like ESP Web Tools). See §5.
+3. **Pairing** — the ESP32 generates its key pair and shows the public key (display / access point with a small web page / QR). The app registers it. Same pattern as contact pairing.
+4. **Test** — a "test the actuator" button: it sends a TEST signal (not a real release), the user sees the relay trip and confirms it works. Essential.
+5. **Status** — the actuator appears in a list with its health status (§6).
 
-Il base è un caso particolare (il più comune) dell'avanzato.
+### Advanced level
+For those who write their own firmware. We provide:
+- Protocol specification (polling endpoint, blob format, how to decrypt/verify the token with the actuator's key).
+- Reference library/SDK (signal verification code to integrate).
+- Transport options (IP polling now, Meshtastic in the future).
+- Full control over what to do after verification.
 
-## 5. Firmware relè (base)
+The base path is a special case (the most common one) of the advanced path.
 
-Firmware precompilato fornito da noi. **Multi-relè, configurabile per-relè (modalità B).**
+## 5. Relay firmware (base)
 
-Parametri per singolo relè:
-- **Modalità**: impulso (scatta per N secondi poi torna) | latch (scatta e resta).
-- **Durata** (per modalità impulso).
-- **Ritardo** prima di attivarsi (per scaglionare le azioni tra relè).
-- **Normalmente aperto / normalmente chiuso** (NO/NC).
+Precompiled firmware provided by us. **Multi-relay, configurable per relay (mode B).**
 
-**Dove si configura:** sull'ESP32 direttamente, via **paginetta web** esposta dal suo access point (pattern IoT collaudato). L'app Sentinella NON conosce i dettagli dei relè: registra la chiave e monitora lo stato. Firmware autonomo, config vive sull'ESP32.
+Parameters per individual relay:
+- **Mode**: pulse (trips for N seconds then returns) | latch (trips and stays).
+- **Duration** (for pulse mode).
+- **Delay** before activating (to stagger actions across relays).
+- **Normally open / normally closed** (NO/NC).
 
-Modello di attivazione dei relè: [DA DECIDERE — probabilmente "un segnale valido → tutti i relè eseguono la propria config (modalità/durata/ritardo)". Segnali distinti per relè distinti = territorio avanzato.]
+**Where it is configured:** on the ESP32 directly, via a **small web page** served from its access point (a proven IoT pattern). The Sentinella app does NOT know the relay details: it registers the key and monitors the status. The firmware is autonomous; the config lives on the ESP32.
 
-## 6. Stato di salute (il cuore onesto della UX)
+Relay activation model: [TO BE DECIDED — probably "one valid signal → all relays execute their own config (mode/duration/delay)". Distinct signals for distinct relays = advanced territory.]
 
-Poiché l'attuatore fa polling, il server sa **quando l'ha sentito l'ultima volta**. L'app mostra lo stato:
-- "Ultimo contatto: 2 minuti fa ✓"
-- "⚠ Nessun contatto da 3 giorni — l'attuatore potrebbe essere offline."
+## 6. Health status (the honest heart of the UX)
 
-Trasforma un limite (l'attuatore può cadere silenziosamente) in qualcosa di visibile e gestibile. Rende il sistema onesto: mostra lo stato reale invece di promettere affidabilità. [DA DEFINIRE: soglie di allerta, se/come notificare l'utente quando un attuatore tace troppo a lungo.]
+Since the actuator polls, the server knows **when it last heard from it**. The app shows the status:
+- "Last contact: 2 minutes ago ✓"
+- "⚠ No contact for 3 days — the actuator may be offline."
 
-## 7. Punti aperti
-- Gateway IP↔Meshtastic (fase successiva).
-- Modello di attivazione multi-relè (tutti insieme vs indirizzabili).
-- Soglie e notifiche dello stato di salute.
-- Schema dati lato server per registrare attuatori e il loro blob (probabilmente tabella dedicata `actuator_*`, separata da switch_contents per polling mirato ed efficienza — l'ESP32 non deve scaricare documenti/foto pesanti).
-- Come l'ESP32 espone/registra la pubblica in modo sicuro (verifica di persona? QR firmato?).
-- Pagamenti / posizionamento come feature premium [prossima discussione].
+This turns a limitation (the actuator can fail silently) into something visible and manageable. It keeps the system honest: it shows the real status instead of promising reliability. [TO BE DEFINED: alert thresholds, whether/how to notify the user when an actuator stays silent too long.]
 
----
-
-## 8. Modello di sostenibilità e pagamenti
-
-### Principio etico cardine
-**La sicurezza di base di una persona a rischio non può stare dietro un paywall.** Il core di sicurezza (dead-man's switch, check-in, rilascio ai contatti, crittografia, Shamir, verifica di persona, duress PIN, recovery) è e resta **gratuito e open source** per tutti. Poiché il codice è AGPL, la sicurezza è sempre disponibile a chi è disposto a self-hostare/auto-costruire: si paga la COMODITÀ di non farlo, mai la protezione.
-
-### Cosa è gratis / cosa è a pagamento
-- **Gratis (sicurezza essenziale):** tutto il core. + il *protocollo* attuatori aperto (un utente avanzato costruisce e gestisce il proprio attuatore senza pagare).
-- **A pagamento (comodità/servizio):** il **servizio attuatori** erogato come abbonamento ricorrente — firmware relè pronto, configurazione guidata, e soprattutto l'**hosting del polling/infrastruttura**. Modello: premium *come servizio*, non acquisto una-tantum (reddito ricorrente, più sostenibile).
-
-### Principio: il pagamento non è MAI un single-point-of-failure nella sicurezza
-**Uno switch armato con attuatore resta protetto anche se l'abbonamento scade.** L'abbonamento abilita la CONFIGURAZIONE e l'armamento di (nuovi) attuatori; una volta armato, lo switch funziona per sempre, indipendentemente dallo stato del pagamento.
-
-Conseguenza tecnica: la verifica dell'abbonamento avviene al momento di **armare/configurare**, non al momento del **rilascio**. Il diritto viene "congelato" nello switch all'armamento; il percorso di rilascio (il momento critico) NON ricontrolla il pagamento — deve essere il più robusto e con meno dipendenze possibile. Questo è anche buona sicurezza: il rilascio non deve dipendere da un server di billing.
-
-### Nodi aperti da affrontare [DA DECIDERE]
-- **Tracciabilità dei pagamenti:** un attivista in regime ostile che paga con carta lascia una traccia ("usa uno strumento anti-sorveglianza"). Valutare pagamenti privacy-preserving (crypto? voucher? pagamento da parte di organizzazioni?), o accettare che il servizio a pagamento è per chi non è in quello scenario estremo (self-hosting gratuito per gli altri).
-- **Commissioni store:** Play/App Store prendono 15-30% sui beni digitali e impongono il loro sistema di pagamento (tracciabile). Valutare se fatturare l'hosting fuori dall'app (sul web) dove le regole lo consentono.
-- Prezzo, valuta, tier.
-
-### Presentazione nell'app (principi)
-- **Mai** un paywall che blocca una funzione di sicurezza. Nessun "sblocca la protezione". La protezione è già lì, gratis.
-- La feature premium (attuatori) si presenta come **estensione opzionale** in una sezione "avanzate/estensioni", con prezzo chiaro e il *perché* (sostiene sviluppo e infrastruttura).
-- **Trasparenza sul modello:** una schermata onesta — "Sentinella è gratis e open source. Il servizio attuatori è a pagamento per coprire i costi di infrastruttura. Se non puoi pagare, puoi self-hostare: ecco come."
-- **Framing "sostieni + ottieni", non "compra".** Per uno strumento civico onesto, gli utenti vogliono sostenere; il pagamento è più simile a una donazione con beneficio che a una transazione estrattiva.
-- [DA DEFINIRE: schermate concrete, punto di ingresso nel flusso, come mostrare il prezzo.]
+## 7. Open points
+- IP↔Meshtastic gateway (later phase).
+- Multi-relay activation model (all together vs addressable).
+- Health-status thresholds and notifications.
+- Server-side data schema to register actuators and their blob (probably a dedicated `actuator_*` table, separate from switch_contents for targeted polling and efficiency — the ESP32 must not download heavy documents/photos).
+- How the ESP32 exposes/registers its public key securely (in-person verification? signed QR?).
+- Payments / positioning as a premium feature [next discussion].
 
 ---
 
-## 9. Sistema di pagamento — licenza firmata manuale
+## 8. Sustainability and payment model
 
-### Modello scelto
-Pagamento **completamente disaccoppiato** dallo sblocco della feature (massima privacy, zero commissioni store, zero infrastruttura di billing):
-1. L'utente paga **fuori dall'app**, come preferisce/può: Monero, voucher/codici acquistabili altrove (anche in contanti o tramite un'organizzazione), bonifico, ecc.
-2. L'utente **contatta** (es. via mail) per ottenere lo sblocco.
-3. Si emette manualmente una **licenza firmata** (codice) che l'utente inserisce in un campo "riscatta codice" nell'app.
-4. L'app **verifica la firma** con la chiave pubblica dell'emittente (embedded nell'app). Nessun server di billing, nessun legame automatico tracciabile tra account app e pagamento.
+### Core ethical principle
+**The basic security of a person at risk cannot sit behind a paywall.** The security core (dead man's switch, check-in, release to contacts, cryptography, Shamir, in-person verification, duress PIN, recovery) is and remains **free and open source** for everyone. Since the code is AGPL, security is always available to anyone willing to self-host/build it themselves: you pay for the CONVENIENCE of not doing so, never for the protection.
 
-### Durata
-Codice **a tempo**, a scaglioni: **1 / 2 / 3 / 5 anni**. Riduce la frequenza di rinnovi manuali. Coerente con "il pagamento non è single-point-of-failure": la licenza abilita la CONFIGURAZIONE di nuovi attuatori; gli switch già armati funzionano per sempre anche a licenza scaduta.
+### What is free / what is paid
+- **Free (essential security):** the entire core. + the open actuator *protocol* (an advanced user builds and runs their own actuator without paying).
+- **Paid (convenience/service):** the **actuator service** delivered as a recurring subscription — ready-made relay firmware, guided configuration, and above all the **hosting of the polling/infrastructure**. Model: premium *as a service*, not a one-time purchase (recurring revenue, more sustainable).
 
-### Forma crittografica della licenza (sicurezza)
-La licenza NON è un codice indovinabile o condivisibile a piacere: è una **licenza firmata**.
-- L'emittente ha una coppia di chiavi dedicata (privata custodita, pubblica embedded nell'app).
-- Il codice è una **firma** su un payload tipo: `{ scope: "actuators", validUntil: <data>, ... }` (+ eventuale binding, vedi sotto).
-- L'app verifica la firma con la pubblica embedded → codice non falsificabile né generabile da terzi.
-- Stesso principio crittografico (firma asimmetrica) già usato ovunque in Sentinella. Riusa `@noble`.
+### Principle: payment is NEVER a single point of failure in security
+**An armed switch with an actuator remains protected even if the subscription expires.** The subscription enables the CONFIGURATION and arming of (new) actuators; once armed, the switch works forever, regardless of payment status.
 
-### Nodi aperti sulla licenza [DA DECIDERE]
-- **Binding**: la licenza è legata a un'identità/dispositivo (non condivisibile) o è "bearer" (chi ce l'ha la usa)?
-  - Bearer = più privacy (nessun dato dell'utente nella licenza) ma condivisibile/rivendibile.
-  - Binding all'ownerId/pubkey = non condivisibile ma lega la licenza all'identità (meno privacy).
-  - Trade-off privacy vs anti-condivisione da valutare. Per uno strumento pro-privacy, il bearer potrebbe essere accettabile (la feature è di nicchia, la condivisione è limitata).
-- **Revoca**: se una licenza viene abusata, come si revoca senza un server? (lista di revoca embedded negli update dell'app? o si accetta che non sia revocabile?)
-- **Policy store**: l'app deve avere SOLO un campo "riscatta codice", SENZA indirizzare al pagamento esterno dentro l'app (le policy Apple/Google vietano di linkare a pagamenti esterni per beni digitali). Pagamento e istruzioni vivono FUORI (sito/README). Il campo di riscatto è come riscattare una gift card — generalmente tollerato.
+Technical consequence: subscription verification happens at **arm/configure** time, not at **release** time. The entitlement is "frozen" into the switch at arming; the release path (the critical moment) does NOT re-check payment — it must be as robust and dependency-free as possible. This is also good security: release must not depend on a billing server.
 
-### Perché questo modello per Sentinella
-- Massima privacy dell'utente (pagamento e identità-app scollegati).
-- Zero commissioni store, zero infrastruttura di billing.
-- Coerente con la scala iniziale (pochi utenti premium → gestione manuale fattibile).
-- L'utente a rischio ESTREMO non paga comunque: usa il core gratuito/self-hosted. Chi paga è l'utente meno a rischio → la tracciabilità residua è meno critica.
-- Contro: non scala automaticamente (bel problema da avere; si automatizza dopo), latenza dello sblocco (accettabile per feature non-urgente).
+### Open issues to address [TO BE DECIDED]
+- **Payment traceability:** an activist under a hostile regime who pays by card leaves a trace ("uses an anti-surveillance tool"). Evaluate privacy-preserving payments (crypto? vouchers? payment by organizations?), or accept that the paid service is for those not in that extreme scenario (free self-hosting for the others).
+- **Store fees:** Play/App Store take 15-30% on digital goods and impose their own payment system (traceable). Evaluate billing the hosting outside the app (on the web) where the rules allow it.
+- Price, currency, tiers.
+
+### Presentation in the app (principles)
+- **Never** a paywall blocking a security function. No "unlock your protection". The protection is already there, for free.
+- The premium feature (actuators) is presented as an **optional extension** in an "advanced/extensions" section, with a clear price and the *why* (it supports development and infrastructure).
+- **Transparency about the model:** an honest screen — "Sentinella is free and open source. The actuator service is paid to cover infrastructure costs. If you can't pay, you can self-host: here's how."
+- **"Support + get" framing, not "buy".** For an honest civic tool, users want to support it; the payment is closer to a donation with a benefit than an extractive transaction.
+- [TO BE DEFINED: concrete screens, entry point in the flow, how to show the price.]
 
 ---
 
-## 10. Modello di attivazione multi-relè (approfondimento)
+## 9. Payment system — manual signed license
 
-### Un solo segnale (Scenario A)
-In Sentinella il rilascio è **atomico e binario**: lo switch scatta (RELEASED) o no; quando k contatti approvano si sblocca TUTTO il pacchetto. Non esistono rilasci parziali o graduati. Quindi c'è **un solo momento di attivazione** → **un solo segnale** per l'attuatore. Segnali distinti per relè distinti (Scenario B) sarebbero potenza inutilizzabile (non c'è un evento distinto che li generi). La ricchezza sta nella **configurazione per-relè**, non in segnali multipli.
+### Chosen model
+Payment **fully decoupled** from unlocking the feature (maximum privacy, zero store fees, zero billing infrastructure):
+1. The user pays **outside the app**, however they prefer/can: Monero, vouchers/codes purchasable elsewhere (including with cash or through an organization), bank transfer, etc.
+2. The user **makes contact** (e.g. by email) to obtain the unlock.
+3. A **signed license** (code) is issued manually, which the user enters in a "redeem code" field in the app.
+4. The app **verifies the signature** with the issuer's public key (embedded in the app). No billing server, no automatic traceable link between app account and payment.
 
-### Numero di relè configurabile
-Il numero di relè NON è fisso: l'utente collega da 1 a N relè (l'ESP32 ha molti GPIO). La config è una **lista di definizioni di relè**; aggiungere un relè = aggiungere una voce con il suo pin e la sua config. Il firmware itera sulla lista quando arriva il segnale.
+### Duration
+A **time-limited** code, in tiers: **1 / 2 / 3 / 5 years**. This reduces the frequency of manual renewals. Consistent with "payment is not a single point of failure": the license enables the CONFIGURATION of new actuators; already-armed switches work forever even with an expired license.
 
-### Parametri per singolo relè
-- **Pin GPIO** a cui è collegato (l'utente sa dove attaccare i fili).
-- **Modalità**: impulso (scatta per N secondi poi torna) | latch (scatta e resta).
-- **Durata** (per impulso).
-- **Ritardo** prima di attivarsi → permette di orchestrare una SEQUENZA da un unico segnale (relè 1 a t=0, relè 2 a t=10s, relè 3 a t=60s).
-- **NO/NC** (normalmente aperto / normalmente chiuso).
-- **Idempotenza (vedi sotto)**: una-volta-sola | mantieni-stato.
+### Cryptographic form of the license (security)
+The license is NOT a guessable or freely shareable code: it is a **signed license**.
+- The issuer has a dedicated key pair (private key kept safe, public key embedded in the app).
+- The code is a **signature** over a payload like: `{ scope: "actuators", validUntil: <data>, ... }` (+ optional binding, see below).
+- The app verifies the signature with the embedded public key → the code cannot be forged or generated by third parties.
+- Same cryptographic principle (asymmetric signature) already used throughout Sentinella. Reuses `@noble`.
 
-### Idempotenza / comportamento al riavvio
-Due livelli:
-- **Il firmware** ha la CAPACITÀ di entrambi i comportamenti (logica + memoria persistente NVS/flash per ricordare "rilascio già eseguito").
-- **La config** (paginetta/file) espone all'utente la SCELTA per-relè.
+### Open issues on the license [TO BE DECIDED]
+- **Binding**: is the license tied to an identity/device (non-shareable) or is it a "bearer" license (whoever holds it uses it)?
+  - Bearer = more privacy (no user data in the license) but shareable/resellable.
+  - Binding to the ownerId/pubkey = non-shareable but ties the license to the identity (less privacy).
+  - Privacy vs anti-sharing trade-off to evaluate. For a pro-privacy tool, bearer might be acceptable (the feature is niche, sharing is limited).
+- **Revocation**: if a license is abused, how is it revoked without a server? (a revocation list embedded in app updates? or accept that it is not revocable?)
+- **Store policy**: the app must have ONLY a "redeem code" field, WITHOUT directing to the external payment inside the app (Apple/Google policies forbid linking to external payments for digital goods). Payment and instructions live OUTSIDE (website/README). The redeem field is like redeeming a gift card — generally tolerated.
 
-Comportamenti (il firmware base supporta ENTRAMBI, scelta per-relè):
-- **Una-volta-sola**: l'attuatore ricorda in memoria persistente di aver già eseguito quel rilascio e NON ripete ai riavvii successivi. Corretto per azioni-evento (un impulso, apri una serratura una volta). Default consigliato.
-- **Mantieni-stato**: il relè riflette lo stato "RELEASED" finché dura (es. tieni un circuito aperto/chiuso finché lo switch è RELEASED). Per usi in cui l'attivazione è uno stato continuo, non un evento.
-
-### Stato al boot (sicurezza/robustezza — CRITICO)
-Al boot/riavvio dell'ESP32 i relè NON devono scattare per sbaglio (un black-out momentaneo → riavvio non deve simulare un'attivazione). Il firmware deve:
-1. Inizializzare ogni relè nello stato di riposo (secondo NO/NC) PRIMA di entrare in polling.
-2. Distinguere "sto ripartendo pulito" da "ho già ricevuto il segnale" (flag persistente).
-3. Attivare i relè SOLO se riceve/ha ricevuto il segnale valido, mai per il solo fatto di essersi acceso.
-
-### Configurazione: paginetta web + file JSON
-- **Paginetta web** (access point ESP32): user-friendly, percorso base, l'utente non tocca file.
-- **File JSON caricato** (es. `relays.json`): per l'avanzato — versionabile, replicabile (configurare 8 relè identici copiando un file invece di cliccare 8 volte).
-- Offrire entrambi.
-
-### Note pratiche firmware (per l'implementazione)
-- **Pin sicuri**: non tutti i GPIO sono uguali (alcuni solo-input, alcuni strapping-pin che al boot possono impedire l'avvio se pilotati, alcuni assenti su certi moduli). Il percorso base dovrebbe PRE-SUGGERIRE una lista di pin sicuri, non lasciare campo libero (un principiante non sa quali evitare).
-- **Alimentazione relè**: più relè = più corrente; i moduli relè si alimentano a parte (i pin ESP32 pilotano solo il segnale). Nota per la documentazione utente.
+### Why this model for Sentinella
+- Maximum user privacy (payment and app identity disconnected).
+- Zero store fees, zero billing infrastructure.
+- Consistent with the initial scale (few premium users → manual handling is feasible).
+- The user at EXTREME risk doesn't pay anyway: they use the free/self-hosted core. Those who pay are the lower-risk users → the residual traceability is less critical.
+- Cons: it doesn't scale automatically (a nice problem to have; automate later), unlock latency (acceptable for a non-urgent feature).
 
 ---
 
-## 11. Registrazione sicura della chiave dell'attuatore
+## 10. Multi-relay activation model (deep dive)
 
-### Modello scelto: fiducia sul possesso fisico
-A differenza dei contatti (dove si verifica l'identità di una controparte umana remota con il safety number), l'attuatore è un **oggetto dell'utente**, configurato a freddo in un momento e luogo che l'utente controlla. In quel contesto, il **possesso fisico È la radice di fiducia**: non c'è controparte da verificare, c'è l'utente e il suo dispositivo. Un safety number qui sarebbe teatro, non sicurezza (verificheresti che la chiave dell'oggetto-in-mano corrisponde all'oggetto-in-mano).
+### A single signal (Scenario A)
+In Sentinella, release is **atomic and binary**: the switch fires (RELEASED) or it doesn't; when k contacts approve, the WHOLE package unlocks. There are no partial or graduated releases. So there is **a single activation moment** → **a single signal** for the actuator. Distinct signals for distinct relays (Scenario B) would be unusable power (there is no distinct event to generate them). The richness lies in **per-relay configuration**, not in multiple signals.
 
-Principio: non aggiungere cerimoniale di sicurezza dove non aggiunge sicurezza reale.
+### Configurable number of relays
+The number of relays is NOT fixed: the user connects from 1 to N relays (the ESP32 has many GPIOs). The config is a **list of relay definitions**; adding a relay = adding an entry with its pin and its config. The firmware iterates over the list when the signal arrives.
 
-### Assunzioni esplicite (da documentare per l'utente)
-Il modello si fida del MOMENTO del setup. Assunzioni:
-1. **Hardware fidato (supply chain)**: l'ESP32 non è compromesso a monte. Mitigazione: hardware da fonti fidate, l'utente flasha lui stesso il firmware (sa cosa gira), possibilità di verificare il firmware.
-2. **Ambiente di setup sicuro**: nessun osservatore/interferenza durante la configurazione (no malware sul telefono che registra, no ripresa). Setup in ambiente controllato.
-3. **RNG hardware**: il firmware DEVE generare la chiave con l'RNG hardware dell'ESP32 (che ne ha uno), non un seed prevedibile. Requisito firmware — una chiave da RNG debole è indovinabile a prescindere dalla registrazione.
+### Parameters per individual relay
+- **GPIO pin** it is connected to (the user knows where to attach the wires).
+- **Mode**: pulse (trips for N seconds then returns) | latch (trips and stays).
+- **Duration** (for pulse).
+- **Delay** before activating → allows orchestrating a SEQUENCE from a single signal (relay 1 at t=0, relay 2 at t=10s, relay 3 at t=60s).
+- **NO/NC** (normally open / normally closed).
+- **Idempotency (see below)**: once-only | maintain-state.
 
-### Igiene del canale (anche fidandosi del possesso)
-La chiave pubblica dell'ESP32 va trasmessa all'app via **canale locale diretto** (QR mostrato/letto dal dispositivo, oppure USB), **mai wifi in chiaro sulla rete**. Non per verificare (ci si fida del possesso), ma per non introdurre gratuitamente un punto di intercettazione. È igiene, non cerimoniale.
+### Idempotency / behavior on restart
+Two levels:
+- **The firmware** has the CAPABILITY for both behaviors (logic + persistent NVS/flash memory to remember "release already executed").
+- **The config** (web page/file) exposes the per-relay CHOICE to the user.
 
-### Limiti (onesti)
-- NON copre un avversario che manomette la supply chain del dispositivo (ESP32 taroccato prima del setup).
-- NON copre un ambiente di setup compromesso.
-- Per threat model estremi (avversario statale con capacità supply-chain), l'utente avanzato può fare verifiche aggiuntive (build riproducibili del firmware, attestazione), ma NON è il caso base.
-- Per il caso d'uso normale (utente configura il proprio dispositivo in un ambiente che controlla), il modello è adeguato.
+Behaviors (the base firmware supports BOTH, chosen per relay):
+- **Once-only**: the actuator remembers in persistent memory that it has already executed that release and does NOT repeat it on subsequent restarts. Correct for event-actions (a pulse, open a lock once). Recommended default.
+- **Maintain-state**: the relay reflects the "RELEASED" state for as long as it lasts (e.g. keep a circuit open/closed while the switch is RELEASED). For uses where activation is a continuous state, not an event.
 
----
+### State at boot (security/robustness — CRITICAL)
+On ESP32 boot/restart, the relays must NOT trip by accident (a momentary blackout → restart must not simulate an activation). The firmware must:
+1. Initialize every relay to its resting state (according to NO/NC) BEFORE entering polling.
+2. Distinguish "I am restarting clean" from "I have already received the signal" (persistent flag).
+3. Activate the relays ONLY if it receives/has received the valid signal, never merely because it powered on.
 
-## 11-bis. Registrazione via USB — decisione finale
+### Configuration: web page + JSON file
+- **Small web page** (ESP32 access point): user-friendly, base path, the user doesn't touch files.
+- **Uploaded JSON file** (e.g. `relays.json`): for the advanced user — versionable, replicable (configure 8 identical relays by copying a file instead of clicking 8 times).
+- Offer both.
 
-Aggiornamento/precisazione della §11: il canale di registrazione è l'**USB**, con safety number come conferma.
-
-### Perché USB
-- L'USB dell'ESP32 trasporta dati **seriali** (testo), non video. Un safety number è testo → si può mostrare/leggere via seriale.
-- È un **canale fisico diretto** (un cavo): niente radio/wifi/rete, il meno intercettabile in assoluto. Un man-in-the-middle richiederebbe accesso fisico al cavo durante il setup.
-- **L'USB è già collegato durante il flashing del firmware.** Se il percorso base usa un flasher web (es. ESP Web Tools, flasha dal browser via USB), l'utente è già connesso via USB in quel momento. La chiave/safety number appare subito dopo il flash, sullo stesso canale, senza un passaggio in più. Questo rende la registrazione USB accessibile anche nel percorso base, non solo agli avanzati.
-
-### Flusso
-1. L'utente flasha il firmware via USB (flasher web o toolchain).
-2. Appena flashato, l'ESP32 genera la sua coppia di chiavi (RNG hardware) e mostra la pubblica via seriale (il flasher/app la cattura).
-3. L'app deriva e mostra un **safety number** dalle chiavi; l'ESP32 mostra/ha mostrato il proprio. L'utente conferma che coincidono.
-4. La pubblica dell'attuatore è registrata in Sentinella.
-
-### Nota sul safety number qui
-Tecnicamente **ridondante** (il canale USB fisico è già praticamente non-intercettabile), ma il costo di implementarlo è minimo (stampare testo sul seriale) e dà una conferma esplicita rassicurante. Incluso come conferma, non come difesa necessaria — coerente col principio "non aggiungere cerimoniale dove non serve", ma qui il costo è così basso che il valore-tranquillità lo giustifica.
-
-### Requisito firmware ribadito
-La generazione della chiave DEVE usare l'**RNG hardware** dell'ESP32. Una chiave da RNG debole è indovinabile a prescindere dal canale di registrazione.
-
-### Nota UX
-La paginetta web dell'access point resta utile per la **configurazione dei relè** (§10), ma la **registrazione della chiave** avviene via USB (più sicuro e già disponibile al flash). Due canali per due scopi: USB per la chiave, paginetta/file per la config relè.
+### Practical firmware notes (for implementation)
+- **Safe pins**: not all GPIOs are equal (some are input-only, some are strapping pins that can prevent boot if driven, some are absent on certain modules). The base path should PRE-SUGGEST a list of safe pins, not leave it open-ended (a beginner doesn't know which to avoid).
+- **Relay power**: more relays = more current; relay modules are powered separately (the ESP32 pins only drive the signal). Note for the user documentation.
 
 ---
 
-## 12. Stato di salute dell'attuatore (il cuore onesto della UX)
+## 11. Secure registration of the actuator's key
 
-Poiché l'attuatore fa polling, il server sa **quando l'ha sentito l'ultima volta**. Questo permette di mostrare lo stato reale invece di promettere un'affidabilità non garantibile — impedisce all'utente la FALSA FIDUCIA ("il mio attuatore mi protegge" mentre è staccato da giorni). È la feature che rende il sottosistema onesto.
+### Chosen model: trust based on physical possession
+Unlike contacts (where you verify the identity of a remote human counterpart with the safety number), the actuator is an **object owned by the user**, configured offline at a time and place the user controls. In that context, **physical possession IS the root of trust**: there is no counterpart to verify; there is the user and their device. A safety number here would be theater, not security (you would be verifying that the key of the object-in-hand matches the object-in-hand).
 
-### Frequenza di polling
-**Ogni 10 minuti.** Compromesso tra reattività (attivazione entro ~10 min dal RELEASED) e carico/consumo contenuti. (Il rilascio ha comunque ritardi di ore/giorni nel suo flusso, quindi 10 min è ampiamente reattivo abbastanza.)
+Principle: do not add security ceremony where it adds no real security.
 
-### Soglie dello stato di salute
-Il server conosce l'ultimo contatto; l'app deriva uno stato. Le soglie sono tolleranti verso ping saltati isolati (rete instabile, riavvio ESP32, server occupato) ma sensibili ai guasti reali. Taratura indicativa (da affinare con dispositivi veri):
-- **Verde (sano)**: ultimo contatto < ~30 min (almeno un paio di ping recenti riusciti).
-- **Giallo (attenzione)**: silenzio da ~30 min a qualche ora. "Qualcosa potrebbe non andare, tienilo d'occhio."
-- **Rosso (probabilmente offline)**: silenzio da diverse ore (es. 6-12h+). "L'attuatore è quasi certamente offline, intervieni."
+### Explicit assumptions (to document for the user)
+The model trusts the MOMENT of setup. Assumptions:
+1. **Trusted hardware (supply chain)**: the ESP32 is not compromised upstream. Mitigation: hardware from trusted sources, the user flashes the firmware themselves (they know what's running), the option to verify the firmware.
+2. **Secure setup environment**: no observer/interference during configuration (no malware on the phone recording, no filming). Setup in a controlled environment.
+3. **Hardware RNG**: the firmware MUST generate the key with the ESP32's hardware RNG (it has one), not a predictable seed. Firmware requirement — a key from a weak RNG is guessable regardless of the registration process.
 
-Principio: abbastanza tollerante da non gridare al lupo per ogni ping perso, abbastanza sensibile da avvisare prima che sia un problema serio.
+### Channel hygiene (even while trusting possession)
+The ESP32's public key must be transmitted to the app via a **direct local channel** (QR shown/read by the device, or USB), **never in cleartext over wifi on the network**. Not for verification (possession is trusted), but to avoid gratuitously introducing an interception point. It's hygiene, not ceremony.
 
-### Notifiche
-**Push all'allerta (passaggio a rosso), MA SOLO se lo switch è armato.**
-Razionale: un attuatore offline conta davvero solo quando lo switch è armato — se è disarmato non c'è rilascio possibile, quindi l'attuatore offline non è un'emergenza. Notificare solo in stato armato:
-- avvisa quando conta davvero (c'è qualcosa da attivare, e l'attuatore è morto),
-- azzera il rumore quando non serve (switch disarmato).
+### Limits (honest)
+- It does NOT cover an adversary who tampers with the device's supply chain (an ESP32 doctored before setup).
+- It does NOT cover a compromised setup environment.
+- For extreme threat models (a state adversary with supply-chain capabilities), the advanced user can perform additional checks (reproducible firmware builds, attestation), but that is NOT the base case.
+- For the normal use case (a user configuring their own device in an environment they control), the model is adequate.
 
-Esempio notifica: "⚠ Il tuo attuatore non risponde da 8 ore. Lo switch è armato: controlla alimentazione e connettività."
+---
 
-### Visualizzazione in app
-Nella lista attuatori, ogni attuatore mostra il suo stato (verde/giallo/rosso) e "ultimo contatto: X fa". Passivo (sempre visibile aprendo l'app) + push attivo all'allerta con switch armato.
+## 11-bis. Registration via USB — final decision
 
-### Nota
-Questo meccanismo mitiga (non elimina) il limite strutturale dell'attuatore fisico (§3): può ancora cadere silenziosamente, ma ora l'utente lo VEDE e viene avvisato quando conta, e può intervenire (riavviare, controllare alimentazione, ecc.) invece di scoprire troppo tardi che non ha funzionato.
+Update/clarification of §11: the registration channel is **USB**, with a safety number as confirmation.
+
+### Why USB
+- The ESP32's USB carries **serial** data (text), not video. A safety number is text → it can be shown/read over serial.
+- It is a **direct physical channel** (a cable): no radio/wifi/network, the least interceptable channel there is. A man-in-the-middle would require physical access to the cable during setup.
+- **USB is already connected during firmware flashing.** If the base path uses a web flasher (e.g. ESP Web Tools, flashing from the browser over USB), the user is already connected over USB at that moment. The key/safety number appears right after the flash, on the same channel, with no extra step. This makes USB registration accessible in the base path too, not only to advanced users.
+
+### Flow
+1. The user flashes the firmware via USB (web flasher or toolchain).
+2. As soon as it's flashed, the ESP32 generates its key pair (hardware RNG) and shows the public key over serial (the flasher/app captures it).
+3. The app derives and shows a **safety number** from the keys; the ESP32 shows/has shown its own. The user confirms they match.
+4. The actuator's public key is registered in Sentinella.
+
+### Note on the safety number here
+Technically **redundant** (the physical USB channel is already practically non-interceptable), but the cost of implementing it is minimal (printing text to serial) and it provides a reassuring explicit confirmation. Included as confirmation, not as a necessary defense — consistent with the principle "don't add ceremony where it isn't needed", but here the cost is so low that the peace-of-mind value justifies it.
+
+### Firmware requirement restated
+Key generation MUST use the ESP32's **hardware RNG**. A key from a weak RNG is guessable regardless of the registration channel.
+
+### UX note
+The access point's web page remains useful for **relay configuration** (§10), but **key registration** happens via USB (more secure and already available at flash time). Two channels for two purposes: USB for the key, web page/file for the relay config.
+
+---
+
+## 12. Actuator health status (the honest heart of the UX)
+
+Since the actuator polls, the server knows **when it last heard from it**. This makes it possible to show the real status instead of promising reliability that cannot be guaranteed — it prevents the user's FALSE CONFIDENCE ("my actuator protects me" while it has been disconnected for days). It is the feature that keeps the subsystem honest.
+
+### Polling frequency
+**Every 10 minutes.** A compromise between reactivity (activation within ~10 min of RELEASED) and contained load/power consumption. (The release flow involves delays of hours/days anyway, so 10 min is amply reactive enough.)
+
+### Health-status thresholds
+The server knows the last contact; the app derives a status. The thresholds are tolerant of isolated missed pings (unstable network, ESP32 restart, busy server) but sensitive to real failures. Indicative calibration (to refine with real devices):
+- **Green (healthy)**: last contact < ~30 min (at least a couple of recent successful pings).
+- **Yellow (attention)**: silence from ~30 min to a few hours. "Something might be wrong, keep an eye on it."
+- **Red (probably offline)**: silence for several hours (e.g. 6-12h+). "The actuator is almost certainly offline, take action."
+
+Principle: tolerant enough not to cry wolf over every lost ping, sensitive enough to warn before it becomes a serious problem.
+
+### Notifications
+**Push on alert (transition to red), BUT ONLY if the switch is armed.**
+Rationale: an offline actuator really matters only when the switch is armed — if it is disarmed no release is possible, so an offline actuator is not an emergency. Notifying only in the armed state:
+- warns when it really matters (there is something to activate, and the actuator is dead),
+- eliminates the noise when it isn't needed (switch disarmed).
+
+Example notification: "⚠ Your actuator has not responded for 8 hours. The switch is armed: check power and connectivity."
+
+### In-app display
+In the actuator list, each actuator shows its status (green/yellow/red) and "last contact: X ago". Passive (always visible when opening the app) + active push on alert while the switch is armed.
+
+### Note
+This mechanism mitigates (does not eliminate) the structural limitation of the physical actuator (§3): it can still fail silently, but now the user SEES it and is warned when it matters, and can intervene (restart, check power, etc.) instead of finding out too late that it didn't work.

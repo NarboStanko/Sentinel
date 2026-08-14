@@ -1,5 +1,7 @@
 # Sentinella — Design del sottosistema Attuatori
 
+> [🇬🇧 English](ACTUATOR_DESIGN.md) · 🇮🇹 Italiano
+
 Documento di design (su carta). Da implementare a fasi, dopo l'audit professionale (come da THREAT_MODEL). Raccoglie le decisioni prese; i punti aperti sono marcati [DA DECIDERE].
 
 ## 1. Principio guida
