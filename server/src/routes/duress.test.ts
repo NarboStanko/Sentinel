@@ -4,6 +4,7 @@ export {};
 
 process.env['DB_PATH'] = ':memory:';
 
+import type { FastifyError } from 'fastify';
 const { default: Fastify }   = await import('fastify');
 const { db }                 = await import('../db.js');
 const { p256 }               = await import('@noble/curves/p256');
@@ -34,7 +35,7 @@ function assert(cond: boolean, msg: string): void {
 
 async function buildApp() {
   const app = Fastify({ logger: false, trustProxy: true });
-  app.setErrorHandler((err, _req, reply) => {
+  app.setErrorHandler<FastifyError>((err, _req, reply) => {
     const s = (err as any).statusCode ?? 500;
     reply.code(s).send({ error: (err as any).code ?? 'error', message: err.message });
   });

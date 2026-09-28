@@ -1,4 +1,4 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyError } from 'fastify';
 import cors from '@fastify/cors';
 import { pairingRoutes } from './routes/pairing.js';
 import { switchRoutes } from './routes/switch.js';
@@ -32,8 +32,8 @@ registerIpRateLimitHook(app);
 // FST_ERR_CTP_BODY_TOO_LARGE (413) ha un messaggio leggibile dedicato.
 const CLIENT_STATUS = new Set([400, 401, 403, 404, 405, 409, 413, 415, 422, 429]);
 
-app.setErrorHandler((err, req, reply) => {
-  const status = (err as any).statusCode ?? 500;
+app.setErrorHandler<FastifyError>((err, req, reply) => {
+  const status = err.statusCode ?? 500;
   if (status === 413) {
     return reply.code(413).send({
       error: 'payload_too_large',
@@ -42,7 +42,7 @@ app.setErrorHandler((err, req, reply) => {
   }
   if (CLIENT_STATUS.has(status)) {
     return reply.code(status).send({
-      error: (err as any).code ?? 'request_error',
+      error: err.code ?? 'request_error',
       message: err.message,
     });
   }

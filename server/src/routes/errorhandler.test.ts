@@ -3,6 +3,7 @@ export {};
 
 process.env['DB_PATH'] = ':memory:';
 
+import type { FastifyError } from 'fastify';
 const { default: Fastify } = await import('fastify');
 const { pairingRoutes }    = await import('./pairing.js');
 const { switchRoutes }     = await import('./switch.js');
@@ -37,7 +38,7 @@ async function buildApp(nodeEnv: string) {
   process.env['NODE_ENV'] = nodeEnv;
   const app = Fastify({ logger: false, trustProxy: true });
 
-  app.setErrorHandler((err, req, reply) => {
+  app.setErrorHandler<FastifyError>((err, req, reply) => {
     const status = (err as any).statusCode ?? 500;
     if (status === 413) {
       return reply.code(413).send({
