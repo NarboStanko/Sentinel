@@ -1,95 +1,97 @@
-# Sentinella — Guida per il revisore esterno
+# Sentinella — Guide for the external reviewer
 
-> Documento di orientamento per un auditor di sicurezza che riceve questo repository
-> senza conoscere il progetto. Redatto il 2026-07-21 leggendo il codice e i file di
-> configurazione reali; i comandi riportati sono stati eseguiti e verificati.
+> 🇬🇧 English · [🇮🇹 Italiano](REVIEWER_README.it.md)
 
----
-
-## 1. Cos'è il sistema
-
-Sentinella è un *dead man's switch* civico end-to-end encrypted. L'**owner** prepara un
-pacchetto di contenuti, lo cifra sul proprio dispositivo e lo "arma" con un intervallo di
-check-in. Un server (il **postino**) manda periodicamente una push «tutto ok?»; se l'owner
-smette di rispondere (arresto, sparizione), il server chiede ai **contatti fidati** —
-accoppiati di persona via QR — di approvare il rilascio. La chiave del pacchetto (DEK) è
-spezzata con Shamir k-su-N: solo quando almeno k contatti reinviano la propria quota il
-client riesce a ricombinare la chiave e conferma il rilascio. La garanzia principale:
-**il server non conosce mai contenuti, chiavi, DEK né la soglia k** — conserva solo chiavi
-pubbliche, blob opachi (quote reali mescolate a esche), puntatori allo storage esterno e
-stato dello switch. Contromisure per la coercizione: PIN duress (facciata di dati spuri o
-trigger silenzioso del rilascio) e catena audit hash-linked per rilevare manomissioni.
-Attori, avversari e garanzie formali: vedi `docs/THREAT_MODEL.md`.
+> Orientation document for a security auditor receiving this repository
+> without prior knowledge of the project. Written on 2026-07-21 by reading the actual code
+> and configuration files; the commands listed have been executed and verified.
 
 ---
 
-## 2. Struttura del repository
+## 1. What the system is
 
-Il repo è un monorepo npm workspaces (`package.json` di radice, **lockfile unico**
-`package-lock.json` alla radice — non esistono lockfile separati per `app/` e `server/`).
+Sentinella is an end-to-end encrypted civic *dead man's switch*. The **owner** prepares a
+content package, encrypts it on their own device and "arms" it with a check-in interval.
+A server (the **postman**) periodically sends an "all good?" push; if the owner
+stops responding (arrest, disappearance), the server asks the **trusted contacts** —
+paired in person via QR — to approve the release. The package key (DEK) is
+split with Shamir k-of-N: only when at least k contacts send back their share can the
+client recombine the key and confirm the release. The core guarantee:
+**the server never knows contents, keys, the DEK, or the threshold k** — it stores only public
+keys, opaque blobs (real shares mixed with decoys), pointers to external storage and
+switch state. Countermeasures against coercion: duress PIN (facade of fake data or
+silent release trigger) and a hash-linked audit chain to detect tampering.
+Actors, adversaries and formal guarantees: see `docs/THREAT_MODEL.md`.
 
-| Percorso | Contenuto |
+---
+
+## 2. Repository structure
+
+The repo is an npm workspaces monorepo (root `package.json`, **single lockfile**
+`package-lock.json` at the root — there are no separate lockfiles for `app/` and `server/`).
+
+| Path | Contents |
 |---|---|
-| `server/` | Backend Node + TypeScript + Fastify + SQLite (`better-sqlite3`). Coordina switch, push, quote, recovery. |
-| `app/` | App mobile Expo (React Native, SDK 51, `expo-router`). Tutta la crittografia dei contenuti sta qui. |
-| `web/` | `recovery-console.html` — console di recupero via browser (deriva la chiave dalla seed, firma le richieste). |
-| `docs/` | Documentazione per l'audit (vedi §8). |
-| `app/plugins/` | Config plugin Expo (`withNetworkSecurityConfig.js`, vedi §7). |
+| `server/` | Node + TypeScript + Fastify + SQLite backend (`better-sqlite3`). Coordinates switches, pushes, shares, recovery. |
+| `app/` | Expo mobile app (React Native, SDK 51, `expo-router`). All content cryptography lives here. |
+| `web/` | `recovery-console.html` — browser-based recovery console (derives the key from the seed, signs requests). |
+| `docs/` | Audit documentation (see §8). |
+| `app/plugins/` | Expo config plugins (`withNetworkSecurityConfig.js`, see §7). |
 
-### File con la logica di sicurezza, in ordine di rilevanza
+### Files containing the security logic, in order of relevance
 
-**Lato app (dove vive la crittografia):**
+**App side (where the cryptography lives):**
 
-1. `app/lib/crypto.ts` — nucleo crittografico: derivazione identità da seed BIP39,
-   ECDH seal/open (XChaCha20-Poly1305), cifratura contenuti, Shamir split/combine,
-   quote sigillate + esche (`makeDecoy`), trial decryption (`tryOpenShare`, `findMyShare`).
-2. `app/lib/canonicalize.ts` — canonicalizzazione delle richieste firmate; deve restare
-   bit-identica alla controparte server (invariante critico, vedi §6).
-3. `app/lib/keystore.ts` — custodia della seed in `expo-secure-store`
+1. `app/lib/crypto.ts` — cryptographic core: identity derivation from BIP39 seed,
+   ECDH seal/open (XChaCha20-Poly1305), content encryption, Shamir split/combine,
+   sealed shares + decoys (`makeDecoy`), trial decryption (`tryOpenShare`, `findMyShare`).
+2. `app/lib/canonicalize.ts` — canonicalization of signed requests; must remain
+   bit-identical to its server counterpart (critical invariant, see §6).
+3. `app/lib/keystore.ts` — seed custody in `expo-secure-store`
    (`WHEN_UNLOCKED_THIS_DEVICE_ONLY`).
 4. `app/lib/pinHash.ts`, `app/lib/pinPolicy.ts`, `app/lib/lockout.ts`,
-   `app/lib/lockState.ts`, `app/lib/facadeStore.ts` — PIN normale e duress, lockout
-   esponenziale, stato di sblocco, modalità facciata.
-5. `app/lib/auditChain.ts` — verifica client della catena audit.
+   `app/lib/lockState.ts`, `app/lib/facadeStore.ts` — normal and duress PIN, exponential
+   lockout, unlock state, facade mode.
+5. `app/lib/auditChain.ts` — client-side verification of the audit chain.
 6. `app/lib/storage.ts`, `app/lib/storage/googleDrive.ts`, `app/lib/storage/devBlob.ts`,
-   `app/lib/driveAuth.ts`, `app/lib/attachments.ts` — astrazione storage (i blob arrivano
-   ai provider **già cifrati**), OAuth Drive, cifratura allegati.
-7. `app/lib/api.ts` — client HTTP con firma delle richieste.
+   `app/lib/driveAuth.ts`, `app/lib/attachments.ts` — storage abstraction (blobs reach
+   the providers **already encrypted**), Drive OAuth, attachment encryption.
+7. `app/lib/api.ts` — HTTP client with request signing.
 
-**Lato server (dove vivono le decisioni di stato):**
+**Server side (where the state decisions live):**
 
-1. `server/src/middleware/auth.ts` — autenticazione a firma P-256 per richiesta:
-   canonicalizzazione, verifica firma, anti-replay (cache nonce, TTL 6 min), risoluzione
-   attore (`owner` / `contact` / `*-of-switch`).
-2. `server/src/routes/approvals.ts` — cuore del rilascio: `/approval/request`, `/shares`
-   (blob opachi reali+esche), `/approval/submit`, `/release/confirm`. Qui si vede che k
-   resta lato client.
-3. `server/src/services/auditChain.ts` + `server/src/routes/audit_chain.ts` — catena audit
-   hash-linked (SHA-256, hash precedente concatenato) e verifica/ancoraggio.
-4. `server/src/services/scheduler.ts` — il "battito": `tick()` porta gli switch
-   ACTIVE → GRACE → APPROVAL_PENDING e invia le push.
-5. `server/src/routes/duress.ts` — `/duress/trigger`: porta gli switch in
-   APPROVAL_PENDING (mai in RELEASED), rate-limit 3/giorno per owner.
-6. `server/src/routes/recovery.ts` — recovery sociale (rotazione identità sotto quorum +
-   ritardo; mai disarmo né rilascio).
-7. `server/src/routes/auth.ts` — `/auth/challenge` + `/auth/verify` (usati dalla console web).
-8. `server/src/services/rateLimiter.ts` — rate-limit per identità crittografica (+ IP come
-   secondo livello), lockout per pattern sospetti sulle submit.
-9. `server/src/lib/canonical.ts` — controparte server della canonicalizzazione.
-10. `server/src/middleware/validate.ts` — validazione schema dei body.
-11. `server/src/db.ts` — schema SQLite: cosa il server conserva (e cosa no).
+1. `server/src/middleware/auth.ts` — per-request P-256 signature authentication:
+   canonicalization, signature verification, anti-replay (nonce cache, 6 min TTL), actor
+   resolution (`owner` / `contact` / `*-of-switch`).
+2. `server/src/routes/approvals.ts` — heart of the release: `/approval/request`, `/shares`
+   (opaque blobs, real + decoys), `/approval/submit`, `/release/confirm`. Here you can see
+   that k stays client-side.
+3. `server/src/services/auditChain.ts` + `server/src/routes/audit_chain.ts` — hash-linked
+   audit chain (SHA-256, previous hash concatenated) and verification/anchoring.
+4. `server/src/services/scheduler.ts` — the "heartbeat": `tick()` moves switches
+   ACTIVE → GRACE → APPROVAL_PENDING and sends the pushes.
+5. `server/src/routes/duress.ts` — `/duress/trigger`: moves switches to
+   APPROVAL_PENDING (never to RELEASED), rate limit 3/day per owner.
+6. `server/src/routes/recovery.ts` — social recovery (identity rotation under quorum +
+   delay; never disarm nor release).
+7. `server/src/routes/auth.ts` — `/auth/challenge` + `/auth/verify` (used by the web console).
+8. `server/src/services/rateLimiter.ts` — rate limiting per cryptographic identity (+ IP as
+   a second layer), lockout on suspicious submit patterns.
+9. `server/src/lib/canonical.ts` — server counterpart of the canonicalization.
+10. `server/src/middleware/validate.ts` — body schema validation.
+11. `server/src/db.ts` — SQLite schema: what the server stores (and what it does not).
 12. `server/src/routes/switch.ts`, `checkin.ts`, `pairing.ts`, `vault.ts`, `push.ts` —
-    ciclo di vita, check-in, pairing, puntatori ai contenuti, push token.
-13. `server/src/routes/devblob.ts`, `server/src/routes/debug.ts` — **solo sviluppo**
-    (guard `NODE_ENV !== 'production'`): storage placeholder e rotte di test.
+    lifecycle, check-in, pairing, content pointers, push tokens.
+13. `server/src/routes/devblob.ts`, `server/src/routes/debug.ts` — **development only**
+    (guard `NODE_ENV !== 'production'`): placeholder storage and test routes.
 
 ---
 
-## 3. Far girare il server
+## 3. Running the server
 
-**Prerequisiti:** Node.js (testato con **v22.22.3** su Windows 11; nessuna dipendenza da
-OS specifico — `better-sqlite3` compila un modulo nativo, serve una toolchain funzionante
-o il prebuilt). Nessun database esterno: SQLite è embedded.
+**Prerequisites:** Node.js (tested with **v22.22.3** on Windows 11; no OS-specific
+dependency — `better-sqlite3` compiles a native module, so a working toolchain
+or the prebuilt is needed). No external database: SQLite is embedded.
 
 ```bash
 # dalla radice del repo (workspaces: installa server e app insieme)
@@ -101,69 +103,69 @@ npm run dev        # tsx watch src/index.ts — sviluppo con reload
 npm run build && npm start   # tsc → node dist/index.js
 ```
 
-- **Porta:** `4000` di default, override con la variabile `PORT`. Ascolta su `0.0.0.0`.
-- **Database:** creato/inizializzato automaticamente all'avvio (`CREATE TABLE IF NOT
-  EXISTS` in `src/db.ts`). Percorso: variabile `DB_PATH`, default `sentinella.db` nella
-  directory corrente. I test usano `:memory:`.
-- **Log all'avvio:** logger Fastify in JSON su stdout; l'ultima riga utile è
-  `Sentinella server on :4000`. Da quel momento lo scheduler gira con un tick ogni 2 s.
-- **Verifica rapida:** `GET http://localhost:4000/health` →
+- **Port:** `4000` by default, override with the `PORT` variable. Listens on `0.0.0.0`.
+- **Database:** created/initialized automatically at startup (`CREATE TABLE IF NOT
+  EXISTS` in `src/db.ts`). Path: `DB_PATH` variable, default `sentinella.db` in the
+  current directory. Tests use `:memory:`.
+- **Startup logs:** Fastify JSON logger on stdout; the last relevant line is
+  `Sentinella server on :4000`. From that point the scheduler runs with a tick every 2 s.
+- **Quick check:** `GET http://localhost:4000/health` →
   `{ ok: true, service: 'sentinella', ts: ... }`.
 
-Note: `trustProxy: true` è attivo (l'IP client viene letto da `X-Forwarded-For` — rilevante
-per il rate-limit per IP se il server non è dietro un reverse proxy fidato). Header di
-sicurezza impostati su ogni risposta; HSTS solo su HTTPS.
+Notes: `trustProxy: true` is enabled (the client IP is read from `X-Forwarded-For` —
+relevant for per-IP rate limiting if the server is not behind a trusted reverse proxy).
+Security headers are set on every response; HSTS only over HTTPS.
 
 ---
 
-## 4. Lanciare i test
+## 4. Running the tests
 
-Non esiste uno script aggregato: ogni suite ha il suo `npm run`. Tutte girano in Node puro
-via `tsx`, senza emulatore né dispositivo; le suite server usano SQLite in-memory.
-Tempo indicativo: pochi secondi a suite, **~1–2 minuti per l'intero set**.
+There is no aggregate script: each suite has its own `npm run`. All run in plain Node
+via `tsx`, with no emulator or device; the server suites use in-memory SQLite.
+Indicative time: a few seconds per suite, **~1–2 minutes for the whole set**.
 
-**Server** (da `server/`) — 11 suite, **262 test, tutti verificati passanti** il 2026-07-21:
+**Server** (from `server/`) — 11 suites, **262 tests, all verified passing** on 2026-07-21:
 
-| Comando | Test | Copre |
+| Command | Tests | Covers |
 |---|---|---|
-| `npm run test:auth` | 31 | Firma su rotte protette: 401 senza firma, ts scaduto, manomissione, replay, ruoli; equivalenza canonicalizzazione client/server |
-| `npm run test:scheduler` | 33 | ACTIVE→GRACE→APPROVAL_PENDING, idempotenza, push selettive |
-| `npm run test:switch` | 69 | Validazione limiti dev/prod, persistenza, contenuti multipli |
-| `npm run test:contacts` | 33 | Lista contatti, offuscamento (preview troncata dei push token) |
-| `npm run test:push` | 20 | pushSender: payload senza segreti, chiamata a Expo Push API |
-| `npm run test:debug` | 22 | Rotte debug: seed-contacts, expire forzato, guard di stato |
-| `npm run test:errorhandler` | 15 | 4xx al client, 500 senza leak di stack, guard NODE_ENV su rotte dev |
-| `npm run test:routes` | 14 | Pairing: errori client 4xx, nessun dato sensibile negli errori |
-| `npm run test:audit_chain` | 11 | Catena hash: append, verifica, rilevamento manomissioni, ancoraggio |
-| `npm run test:ratelimit` | 8 | Limiti per identità, isolamento tra contatti, lockout |
-| `npm run test:duress` | 6 | Trigger duress: transizioni, rate-limit 3/giorno |
+| `npm run test:auth` | 31 | Signature on protected routes: 401 without signature, expired ts, tampering, replay, roles; client/server canonicalization equivalence |
+| `npm run test:scheduler` | 33 | ACTIVE→GRACE→APPROVAL_PENDING, idempotency, selective pushes |
+| `npm run test:switch` | 69 | Dev/prod limit validation, persistence, multiple contents |
+| `npm run test:contacts` | 33 | Contact list, obfuscation (truncated preview of push tokens) |
+| `npm run test:push` | 20 | pushSender: payload without secrets, call to the Expo Push API |
+| `npm run test:debug` | 22 | Debug routes: seed-contacts, forced expire, state guard |
+| `npm run test:errorhandler` | 15 | 4xx to the client, 500 without stack leaks, NODE_ENV guard on dev routes |
+| `npm run test:routes` | 14 | Pairing: 4xx client errors, no sensitive data in errors |
+| `npm run test:audit_chain` | 11 | Hash chain: append, verification, tamper detection, anchoring |
+| `npm run test:ratelimit` | 8 | Per-identity limits, isolation between contacts, lockout |
+| `npm run test:duress` | 6 | Duress trigger: transitions, rate limit 3/day |
 
-**App** (da `app/`) — 3 suite di logica pura (nessuna UI):
+**App** (from `app/`) — 3 pure-logic suites (no UI):
 
-| Comando | Test | Copre |
+| Command | Tests | Covers |
 |---|---|---|
-| `npm run test:crypto` | 37 asserzioni | Vettori fissi, proprietà soglia (<k fallisce, ≥k riesce), lunghezze multiple, pool misto quote+esche |
-| `npm run test:storage` | 17 | Astrazione StorageProvider: i byte salvati sono il ciphertext, mai chiavi |
-| `npm run test:attachments` | 19 | Cifratura allegati, limiti dimensione |
+| `npm run test:crypto` | 37 assertions | Fixed test vectors, threshold properties (<k fails, ≥k succeeds), multiple lengths, mixed pool of shares + decoys |
+| `npm run test:storage` | 17 | StorageProvider abstraction: the stored bytes are the ciphertext, never keys |
+| `npm run test:attachments` | 19 | Attachment encryption, size limits |
 
-Le schermate React Native e i flussi che richiedono dispositivi fisici (scan QR, push
-reali) **non hanno test automatici** — vedi §7.
+The React Native screens and the flows that require physical devices (QR scan, real
+pushes) **have no automated tests** — see §7.
 
 ---
 
-## 5. Costruire e far girare l'app
+## 5. Building and running the app
 
-**Prerequisiti:** account Expo (owner `narbo` in `app.json`), CLI EAS `>= 19.0.8`
-(`eas.json`), e per le build cloud un login `eas login`. L'app usa `expo-dev-client`,
-quindi **non gira in Expo Go**: serve una development build.
+**Prerequisites:** Expo account (owner `narbo` in `app.json`), EAS CLI `>= 19.0.8`
+(`eas.json`), and for cloud builds an `eas login`. The app uses `expo-dev-client`,
+so it **does not run in Expo Go**: a development build is required.
 
-Profili in `app/eas.json`:
+Profiles in `app/eas.json`:
 
-| Profilo | Uso |
+| Profile | Use |
 |---|---|
-| `development` | Development client, distribuzione interna — è il profilo per il lavoro quotidiano e il collaudo |
-| `preview` | Distribuzione interna, Android come APK installabile direttamente |
-| `production` | Build store, `autoIncrement` della versione |
+| `development` | Development client, internal distribution — this is the profile for daily work and testing |
+| `preview` | Internal distribution, Android as a directly installable APK |
+| `production` | Store build, version `autoIncrement` |
 
 ```bash
 cd app
@@ -171,128 +173,129 @@ npx expo start                                   # dev server (richiede dev buil
 eas build --profile development --platform android   # build del dev client
 ```
 
-Configurazione necessaria in `app/app.json` → `expo.extra`:
+Required configuration in `app/app.json` → `expo.extra`:
 
-- `serverUrl` — URL del backend raggiungibile **dal dispositivo** (attualmente
-  `http://192.168.0.210:4000`, un IP di sviluppo: va adattato alla propria rete).
-- `storageProvider` — `"auto"`: Drive in release, DevBlob in sviluppo.
-- `googleDriveClientIdAndroid` / `googleDriveClientIdWeb` — client OAuth per Google Drive.
-- `eas.projectId` — id progetto EAS (da sostituire se si builda su un altro account).
+- `serverUrl` — backend URL reachable **from the device** (currently
+  `http://192.168.0.210:4000`, a development IP: adapt it to your own network).
+- `storageProvider` — `"auto"`: Drive in release, DevBlob in development.
+- `googleDriveClientIdAndroid` / `googleDriveClientIdWeb` — OAuth clients for Google Drive.
+- `eas.projectId` — EAS project id (to be replaced if building on another account).
 
-Inoltre: `app/google-services.json` (progetto Firebase per le push FCM) e
-`app/network-security-config.xml`, iniettato dal plugin `app/plugins/withNetworkSecurityConfig.js`,
-che **permette HTTP in chiaro solo verso l'IP di sviluppo** (vedi §7). Se si cambia
-`serverUrl`, va aggiornato anche quel file, e serve un nuovo prebuild/build.
-
----
-
-## 6. Percorsi critici da esaminare
-
-### Autenticazione delle richieste (firma per richiesta, niente sessioni)
-Client: `app/lib/canonicalize.ts` (`canonicalize()`) + `app/lib/api.ts` (costruzione e
-firma della richiesta). Server: `server/src/middleware/auth.ts` — `canonicalize()`,
-`verifySig()` (ECDSA P-256 su SHA-256), `checkAndRegisterNonce()` (anti-replay, chiave
-`pub:ts:sig`, TTL 6 min, **cache in memoria**), `lookupActor()` / `requireAuth()`
-(autorizzazione per ruolo e per appartenenza allo switch). Le due canonicalizzazioni
-devono restare bit-identiche: `server/src/routes/auth.test.ts` verifica l'equivalenza.
-`server/src/lib/canonical.ts` (`sortDeep`, `canonicalJson`) è condiviso con la catena audit.
-La console web usa invece `/auth/challenge` + `/auth/verify` (`server/src/routes/auth.ts`).
-
-### Catena audit
-`server/src/services/auditChain.ts` — `computeEventHash()` (SHA-256 dei campi concatenati
-con `|`, incluso `prev_hash`; genesi = 64 zeri), `appendToChain()`. Esposizione e verifica:
-`server/src/routes/audit_chain.ts` (incluso l'ancoraggio: eventi aggiunti dopo un anchor
-vengono rilevati). Verifica lato client: `app/lib/auditChain.ts`, schermata
-`app/app/audit-tools.tsx`. Gli eventi vengono scritti dallo scheduler, dalle approvals e
-dal duress; notare i `try/catch` intorno a `appendToChain` (un fallimento di scrittura
-non blocca la transizione di stato — valutarne le conseguenze).
-
-### Ciclo di vita dello switch
-Stati in `server/src/db.ts` (`DISARMED|ACTIVE|GRACE|APPROVAL_PENDING|RELEASED`).
-Creazione/armamento: `server/src/routes/switch.ts` (validazione limiti in
-`server/src/config/limits.ts`). Check-in con jitter: `server/src/routes/checkin.ts`.
-Transizioni temporali: `server/src/services/scheduler.ts` → `tick()` (esportata per i
-test; `startScheduler()` la invoca ogni 2 s). Le push partono una sola volta per
-transizione, non a ogni tick.
-
-### Soglia Shamir e rilascio
-Split e sigillo: `app/lib/crypto.ts` — `splitSecret()` / `combineSecret()` (Shamir),
-`sealShare()` (quota cifrata per la pubkey del contatto), `makeDecoy()` (esche),
-`tryOpenShare()` / `findMyShare()` (trial decryption: il contatto scarica *tutti* i blob
-da `/shares` e scopre il proprio provando a decifrare). Lato server:
-`server/src/routes/approvals.ts` — `/approval/submit` raccoglie le quote decifrate
-(firmate, rate-limitate per contact_id, duplicate → 409) e restituisce tutte quelle
-raccolte; è **il client** in `app/app/approve.tsx` che tenta la ricombinazione e, se la
-DEK decifra il contenuto, chiama `/release/confirm`. I puntatori ai contenuti sono
-esposti solo in stato RELEASED.
-
-### PIN duress e lock screen
-Setup: `app/app/duress-setup.tsx`; verifica PIN: `app/app/lock.tsx` con
-`app/lib/pinHash.ts` (⚠ oggi SHA-256 singola salata — finding C1 in
-`docs/FINDINGS_TRIAGE.md`), policy in `app/lib/pinPolicy.ts`, lockout esponenziale
-(30 s → 4 h) in `app/lib/lockout.ts`, stato di sblocco in-memory in `app/lib/lockState.ts`
-(riparte sempre bloccata, timeout 3 min in background, deep-link differiti).
-Modalità A (facciata): `app/lib/facadeStore.ts` — dati fittizi, nessuna chiamata al server
-reale. Modalità B (trigger silenzioso): `server/src/routes/duress.ts` — porta gli switch in
-APPROVAL_PENDING saltando la grazia; **mai** direttamente in RELEASED.
-
-### Storage e cifratura dei contenuti
-Cifratura: `app/lib/crypto.ts` (`encryptContent`/`decryptContent`, XChaCha20-Poly1305;
-DEK per switch, persistita solo sul client). Allegati: `app/lib/attachments.ts`.
-Astrazione provider: `app/lib/storage.ts` (interfaccia `StorageProvider`; guardia
-`isStorageReady()` pre-armo) con implementazioni `app/lib/storage/googleDrive.ts`
-(+ OAuth in `app/lib/driveAuth.ts`) e `app/lib/storage/devBlob.ts` (sviluppo, appoggiata
-a `server/src/routes/devblob.ts`). Il server riceve **solo il puntatore**:
-`server/src/routes/vault.ts` e tabella `switch_contents` in `db.ts` (puntatore + IV +
-label non sensibile, mai ciphertext).
+In addition: `app/google-services.json` (Firebase project for FCM pushes) and
+`app/network-security-config.xml`, injected by the plugin `app/plugins/withNetworkSecurityConfig.js`,
+which **allows cleartext HTTP only towards the development IP** (see §7). If you change
+`serverUrl`, that file must be updated too, and a new prebuild/build is required.
 
 ---
 
-## 7. Stato e limiti
+## 6. Critical paths to examine
 
-**Testato automaticamente:** tutta la logica elencata in §4 — crypto pura, transizioni di
-stato, autenticazione a firma, catena audit, rate-limit, duress lato server, storage e
-allegati come moduli puri.
+### Request authentication (per-request signature, no sessions)
+Client: `app/lib/canonicalize.ts` (`canonicalize()`) + `app/lib/api.ts` (request
+construction and signing). Server: `server/src/middleware/auth.ts` — `canonicalize()`,
+`verifySig()` (ECDSA P-256 over SHA-256), `checkAndRegisterNonce()` (anti-replay, key
+`pub:ts:sig`, 6 min TTL, **in-memory cache**), `lookupActor()` / `requireAuth()`
+(authorization by role and by switch membership). The two canonicalizations
+must remain bit-identical: `server/src/routes/auth.test.ts` verifies the equivalence.
+`server/src/lib/canonical.ts` (`sortDeep`, `canonicalJson`) is shared with the audit chain.
+The web console instead uses `/auth/challenge` + `/auth/verify` (`server/src/routes/auth.ts`).
 
-**Non testato automaticamente:** le schermate React Native, il pairing con scan QR reale
-(serve la fotocamera di 2 dispositivi fisici — in `add-friend.tsx` c'è ancora il pulsante
-"(demo) simula scan"), il ciclo push end-to-end su dispositivo, il flusso OAuth Google
-Drive reale, la console web (verificata manualmente).
+### Audit chain
+`server/src/services/auditChain.ts` — `computeEventHash()` (SHA-256 of the fields
+concatenated with `|`, including `prev_hash`; genesis = 64 zeros), `appendToChain()`.
+Exposure and verification: `server/src/routes/audit_chain.ts` (including anchoring: events
+added after an anchor are detected). Client-side verification: `app/lib/auditChain.ts`,
+screen `app/app/audit-tools.tsx`. Events are written by the scheduler, the approvals and
+the duress route; note the `try/catch` blocks around `appendToChain` (a write failure
+does not block the state transition — assess the consequences).
 
-**Configurato per sviluppo, NON per produzione:**
+### Switch lifecycle
+States in `server/src/db.ts` (`DISARMED|ACTIVE|GRACE|APPROVAL_PENDING|RELEASED`).
+Creation/arming: `server/src/routes/switch.ts` (limit validation in
+`server/src/config/limits.ts`). Check-in with jitter: `server/src/routes/checkin.ts`.
+Time-based transitions: `server/src/services/scheduler.ts` → `tick()` (exported for the
+tests; `startScheduler()` invokes it every 2 s). Pushes are sent only once per
+transition, not on every tick.
 
-- `app.json` → `extra.serverUrl = http://192.168.0.210:4000`: **HTTP in chiaro verso un
-  IP locale**. In produzione serve HTTPS e la rimozione dell'eccezione cleartext.
-- `app/network-security-config.xml`: permette cleartext verso `192.168.0.210` (Android).
-  Da rimuovere/svuotare in produzione.
-- `server/src/routes/devblob.ts` (`/dev/blob`) e `server/src/routes/debug.ts`
-  (`/debug/*`): attive quando `NODE_ENV !== 'production'`. Verificare che il deploy
-  imposti davvero `NODE_ENV=production`.
-- Contatti di test `[DEV] Genera 2 contatti test` in compose: solo `__DEV__`.
-- La cache anti-replay e parte del rate-limiting sono **in memoria**: si azzerano al
-  riavvio del server e non sono condivise tra più istanze.
-- Anomalia nota in `app/package.json`: una dependency spuria con chiave `"undefined"` che
-  punta al percorso locale del repo (artefatto di un comando npm; da rimuovere).
+### Shamir threshold and release
+Split and sealing: `app/lib/crypto.ts` — `splitSecret()` / `combineSecret()` (Shamir),
+`sealShare()` (share encrypted to the contact's pubkey), `makeDecoy()` (decoys),
+`tryOpenShare()` / `findMyShare()` (trial decryption: the contact downloads *all* the blobs
+from `/shares` and discovers their own by attempting to decrypt). Server side:
+`server/src/routes/approvals.ts` — `/approval/submit` collects the decrypted shares
+(signed, rate-limited per contact_id, duplicates → 409) and returns all those
+collected; it is **the client**, in `app/app/approve.tsx`, that attempts the recombination
+and, if the DEK decrypts the content, calls `/release/confirm`. The content pointers are
+exposed only in the RELEASED state.
 
-**Trovamenti già noti e triagiati** (non riscoprirli da zero): `docs/FINDINGS_TRIAGE.md` —
-in particolare i critici C1 (PIN con SHA-256 singola), C2 (esche distinguibili dagli
-indici), C3 (il server apprende k via `recoveryK`, in tensione con l'invariante dichiarata).
+### Duress PIN and lock screen
+Setup: `app/app/duress-setup.tsx`; PIN verification: `app/app/lock.tsx` with
+`app/lib/pinHash.ts` (⚠ currently a single salted SHA-256 — finding C1 in
+`docs/FINDINGS_TRIAGE.md`), policy in `app/lib/pinPolicy.ts`, exponential lockout
+(30 s → 4 h) in `app/lib/lockout.ts`, in-memory unlock state in `app/lib/lockState.ts`
+(always restarts locked, 3 min background timeout, deferred deep links).
+Mode A (facade): `app/lib/facadeStore.ts` — fake data, no calls to the real server.
+Mode B (silent trigger): `server/src/routes/duress.ts` — moves switches to
+APPROVAL_PENDING skipping the grace period; **never** directly to RELEASED.
 
-**Prima dell'uso reale** il progetto stesso dichiara necessari: audit indipendente, threat
-model formale completo e revisione legale (vedi `README.md` di radice).
+### Storage and content encryption
+Encryption: `app/lib/crypto.ts` (`encryptContent`/`decryptContent`, XChaCha20-Poly1305;
+per-switch DEK, persisted only on the client). Attachments: `app/lib/attachments.ts`.
+Provider abstraction: `app/lib/storage.ts` (`StorageProvider` interface;
+`isStorageReady()` guard before arming) with implementations `app/lib/storage/googleDrive.ts`
+(+ OAuth in `app/lib/driveAuth.ts`) and `app/lib/storage/devBlob.ts` (development, backed
+by `server/src/routes/devblob.ts`). The server receives **only the pointer**:
+`server/src/routes/vault.ts` and the `switch_contents` table in `db.ts` (pointer + IV +
+non-sensitive label, never ciphertext).
 
 ---
 
-## 8. Gli altri documenti in `docs/`
+## 7. Status and limitations
 
-| Documento | Contenuto |
+**Automatically tested:** all the logic listed in §4 — pure crypto, state transitions,
+signature authentication, audit chain, rate limiting, server-side duress, storage and
+attachments as pure modules.
+
+**Not automatically tested:** the React Native screens, pairing with real QR scanning
+(requires the cameras of 2 physical devices — `add-friend.tsx` still contains the
+"(demo) simula scan" button), the end-to-end push cycle on a device, the real Google
+Drive OAuth flow, the web console (verified manually).
+
+**Configured for development, NOT for production:**
+
+- `app.json` → `extra.serverUrl = http://192.168.0.210:4000`: **cleartext HTTP towards a
+  local IP**. Production requires HTTPS and removal of the cleartext exception.
+- `app/network-security-config.xml`: allows cleartext towards `192.168.0.210` (Android).
+  To be removed/emptied in production.
+- `server/src/routes/devblob.ts` (`/dev/blob`) and `server/src/routes/debug.ts`
+  (`/debug/*`): active when `NODE_ENV !== 'production'`. Verify that the deployment
+  really sets `NODE_ENV=production`.
+- Test contacts `[DEV] Genera 2 contatti test` in compose: `__DEV__` only.
+- The anti-replay cache and part of the rate limiting are **in memory**: they reset on
+  server restart and are not shared across multiple instances.
+- Known anomaly in `app/package.json`: a spurious dependency with key `"undefined"`
+  pointing to the repo's local path (artifact of an npm command; to be removed).
+
+**Findings already known and triaged** (do not rediscover them from scratch):
+`docs/FINDINGS_TRIAGE.md` — in particular the critical ones: C1 (PIN with a single
+SHA-256), C2 (decoys distinguishable by their indices), C3 (the server learns k via
+`recoveryK`, in tension with the declared invariant).
+
+**Before real-world use** the project itself declares as necessary: an independent audit,
+a complete formal threat model and a legal review (see the root `README.md`).
+
+---
+
+## 8. The other documents in `docs/`
+
+| Document | Contents |
 |---|---|
-| `THREAT_MODEL.md` | Modello di minaccia: attori, avversari (incluso il coercitore), garanzie promesse e loro confini. **Da leggere per primo.** |
-| `CRYPTO_INVENTORY.md` | Inventario crittografico redatto dal codice reale (librerie e versioni dal lockfile, primitive, dove commento e codice divergono). |
-| `FINDINGS_TRIAGE.md` | Trovamenti già noti con triage: stato (reale/falso allarme), gravità, note per il fix. |
-| `DESIGN_DECISIONS.md` | Motivazioni delle scelte deliberate che senza contesto sembrerebbero errori (firma per richiesta vs sessioni, rate-limit per identità, rotte anonime del recovery, …). |
-| `AUDIT_PROMPTS.md` | Prompt pronti per audit assistito da modelli linguistici, con metodologia (sessioni separate; consegnare `DESIGN_DECISIONS.md` solo in seconda fase). |
+| `THREAT_MODEL.md` | Threat model: actors, adversaries (including the coercer), promised guarantees and their boundaries. **Read this first.** |
+| `CRYPTO_INVENTORY.md` | Cryptographic inventory drawn from the actual code (libraries and versions from the lockfile, primitives, where comments and code diverge). |
+| `FINDINGS_TRIAGE.md` | Already-known findings with triage: status (real/false alarm), severity, notes for the fix. |
+| `DESIGN_DECISIONS.md` | Rationale for deliberate choices that would look like mistakes without context (per-request signature vs sessions, per-identity rate limiting, anonymous recovery routes, …). |
+| `AUDIT_PROMPTS.md` | Ready-made prompts for LLM-assisted auditing, with methodology (separate sessions; hand over `DESIGN_DECISIONS.md` only in a second phase). |
 
-> Nota metodologica da `AUDIT_PROMPTS.md`, valida anche per revisori umani: leggere
-> `DESIGN_DECISIONS.md` *dopo* essersi formati un giudizio indipendente riduce il rischio
-> di accettare i razionali invece di metterli alla prova.
+> Methodological note from `AUDIT_PROMPTS.md`, valid for human reviewers too: reading
+> `DESIGN_DECISIONS.md` *after* forming an independent judgment reduces the risk of
+> accepting the rationales instead of putting them to the test.

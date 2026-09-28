@@ -1,114 +1,116 @@
-# Sentinella — Decisioni di design e motivazioni
+# Sentinella — Design decisions and rationale
 
-Documento per il revisore. Ogni scelta qui elencata è deliberata: senza il contesto, alcune apparirebbero errori.
+> 🇬🇧 English · [🇮🇹 Italiano](DESIGN_DECISIONS.it.md)
 
----
-
-## Autenticazione e trasporto
-
-**Firma su ogni rotta di scrittura, non token di sessione.**
-Un token di sessione rubato dà accesso completo fino alla scadenza. Una firma per richiesta lega ogni azione alla chiave privata dell'attore, che non lascia mai il dispositivo. Il costo è la canonicalizzazione, che diventa un invariante critico.
-
-**Canonicalizzazione condivisa bit-identica client/server.**
-Estratta in un modulo senza dipendenze (`app/lib/canonicalize.ts` ↔ `server/src/lib/canonical.ts`), con un test che verifica l'equivalenza. Se le due implementazioni divergono di un solo carattere, tutte le firme falliscono. L'ordinamento delle chiavi è **ricorsivo** sugli oggetti annidati e preserva l'ordine negli array.
-
-**Rate-limit per identità crittografica, non per IP.**
-Più contatti dello stesso owner possono trovarsi sulla stessa rete (stessa casa, stesso ufficio). Un rate-limit per IP li farebbe bloccare a vicenda durante un rilascio, che è esattamente il momento in cui il sistema deve funzionare. Il limite per IP resta come secondo livello anti-DoS.
-
-**Alcune rotte restano anonime per necessità.**
-`/recovery/initiate` e `/recovery/finalize` non possono richiedere una firma: servono proprio a chi ha perso la chiave privata. È un compromesso consapevole, mitigato dal ritardo di 7 giorni e dall'approvazione dei contatti.
+Document for the reviewer. Every choice listed here is deliberate: without context, some would look like mistakes.
 
 ---
 
-## Quorum e soglia
+## Authentication and transport
 
-**k minimo 2, per vincolo di prodotto.**
-Un rilascio su singola approvazione renderebbe il sistema fragile a un solo contatto compromesso, distratto o coercizzato. Il costo è che serve un minimo di due contatti reali per usare il sistema, e i test richiedono tre dispositivi.
+**A signature on every write route, not session tokens.**
+A stolen session token grants full access until it expires. A per-request signature binds every action to the actor's private key, which never leaves the device. The cost is canonicalization, which becomes a critical invariant.
 
-**Il duress avvia il rilascio, non lo esegue.**
-La modalità B porta gli switch in `APPROVAL_PENDING` saltando la grazia. Non li porta in `RELEASED`. Anche sotto coercizione, il consenso dei contatti resta necessario: nessun singolo evento sul dispositivo dell'owner può far uscire i contenuti.
+**Shared, bit-identical canonicalization on client and server.**
+Extracted into a dependency-free module (`app/lib/canonicalize.ts` ↔ `server/src/lib/canonical.ts`), with a test that verifies equivalence. If the two implementations diverge by a single character, all signatures fail. Key ordering is **recursive** over nested objects and preserves order within arrays.
 
----
+**Rate limiting by cryptographic identity, not by IP.**
+Multiple contacts of the same owner may be on the same network (same house, same office). A per-IP rate limit would make them block each other during a release, which is exactly the moment the system must work. The per-IP limit remains as a second anti-DoS layer.
 
-## Catena audit
-
-**Firma solo le azioni dell'utente.**
-Gli eventi generati dallo scheduler (`CHECK_PENDING`, `APPROVAL_REQUESTED`) entrano in catena con `actor_id = 'server'` e firma nulla. Dare una chiave di firma al server significherebbe che un attaccante che compromette il server può firmare eventi falsi — riaprendo esattamente la minaccia che la catena dovrebbe contrastare. Meglio dichiarare che quegli eventi non hanno provenienza dimostrabile.
-
-**Una catena per owner, non una globale.**
-Una catena unica esporrebbe a ogni utente il volume di attività degli altri. La separazione preserva la privacy al costo di una gestione più complessa degli eventi che coinvolgono due parti.
-
-**Eventi multi-attore duplicati con prospettive distinte.**
-Il pairing genera `CONTACT_PAIRED` nella catena dell'owner (firmato dall'owner) e `BECAME_CONTACT_OF` in quella del contatto (firmato dal contatto). Non è ridondanza: ciascun attore ha la propria narrazione verificabile della stessa interazione, firmata da sé.
-
-**La firma è dentro l'hash della catena.**
-Lega la sequenza alla provenienza: non si può sostituire una firma senza rompere la catena, né riordinare senza invalidare le firme.
-
-**`chain_index` e `timestamp_ms` sono nell'hash; l'`id` autoincrementale no.**
-`chain_index` impedisce la cancellazione di eventi intermedi con rinumerazione; `timestamp_ms` impedisce il riordino. L'`id` del database è escluso perché il client, che verifica localmente, non lo conosce — includerlo renderebbe la verifica non deterministica.
-
-**Le scritture in catena sono best-effort.**
-Ogni `appendToChain` è in `try/catch` e non è transazionale con l'azione principale. Un errore nell'audit non deve impedire all'utente di armare o disarmare uno switch. Conseguenza dichiarata: in caso di crash tra l'azione e l'audit, un evento può mancare. Si è preferita la disponibilità dell'azione alla completezza del log.
-
-**L'anchor è manuale.**
-L'app mostra l'hash corrente e invita l'utente a salvarlo fuori dal sistema. Nessuna pubblicazione automatica su blockchain o servizi terzi: introdurrebbe costi, dipendenze e — soprattutto — un pattern di metadati che rivelerebbe l'uso di Sentinella a chi osserva.
+**Some routes remain anonymous by necessity.**
+`/recovery/initiate` and `/recovery/finalize` cannot require a signature: they exist precisely for someone who has lost their private key. This is a conscious trade-off, mitigated by the 7-day delay and by contact approval.
 
 ---
 
-## Coercizione
+## Quorum and threshold
 
-**Biometria esclusa dallo sblocco.**
-Contro-intuitivo rispetto alla prassi comune, ma necessario: un'impronta si ottiene con la forza fisica, un PIN no. Se l'app si sbloccasse con l'impronta, nessuna delle due modalità duress scatterebbe mai. La biometria resta solo per accedere alla configurazione del duress, dove l'utente non è sotto coercizione.
+**Minimum k of 2, as a product constraint.**
+A release on a single approval would make the system fragile against a single compromised, distracted, or coerced contact. The cost is that at least two real contacts are needed to use the system, and tests require three devices.
 
-**PIN unico per sblocco e accesso alla seed.**
-Sotto stress, meno segreti da ricordare significa meno errori. L'utente deve tenere a mente due PIN: quello vero e quello di emergenza.
+**Duress initiates the release, it does not execute it.**
+Mode B moves switches into `APPROVAL_PENDING`, skipping the grace period. It does not move them into `RELEASED`. Even under coercion, the contacts' consent remains necessary: no single event on the owner's device can cause the contents to be released.
 
-**Facciata con dati spuri, non account vuoto.**
-Un account completamente vuoto è sospetto ("perché hai quest'app se non ci hai nulla?"). La facciata mostra uno switch disarmato e contatti fittizi marcati come verificati: un utente che ha provato lo strumento senza usarlo davvero.
+---
 
-**La facciata è interamente locale.**
-Un guard centrale nella funzione di richiesta intercetta ogni chiamata — incluse quelle firmate, che passano dalla stessa funzione — e restituisce un errore di rete generico. Il server non riceve alcun traffico durante la facciata: verificato sul campo osservando i log per l'intera durata di una sessione in modalità A.
+## Audit chain
 
-**La facciata persiste tra i riavvii.**
-Se il coercitore spegne e riaccende il dispositivo e fa risbloccare, deve rivedere gli stessi dati spuri. Una facciata che si resetta mostrerebbe dati diversi al secondo accesso, tradendo la finzione.
+**Only user actions are signed.**
+Events generated by the scheduler (`CHECK_PENDING`, `APPROVAL_REQUESTED`) enter the chain with `actor_id = 'server'` and a null signature. Giving the server a signing key would mean an attacker who compromises the server could sign forged events — reopening exactly the threat the chain is meant to counter. Better to declare that those events have no provable provenance.
 
-**Conferme scritte esatte per le azioni catastrofiche.**
-Attivare la modalità B richiede di digitare `HO CAPITO`; avviare il recovery dopo una verifica fallita richiede `AVVIA RECOVERY`. Confronto stretto, sensibile alle maiuscole, senza normalizzazione. Un tap singolo su un alert è troppo facile da dare per panico o per errore, e queste azioni sono irreversibili o costose.
+**One chain per owner, not a global one.**
+A single chain would expose every user's activity volume to every other user. The separation preserves privacy at the cost of more complex handling of events involving two parties.
 
-**Il rate-limit sul trigger è silenzioso.**
-Il quarto trigger in una giornata riceve `429` e l'app non mostra nulla di diverso. Rivelare l'esistenza di un limite direbbe al coercitore che c'è un meccanismo nascosto.
+**Multi-actor events are duplicated with distinct perspectives.**
+Pairing generates `CONTACT_PAIRED` in the owner's chain (signed by the owner) and `BECAME_CONTACT_OF` in the contact's chain (signed by the contact). This is not redundancy: each actor has their own verifiable narrative of the same interaction, signed by themselves.
 
-**Blacklist di PIN comuni e lunghezza minima.**
-Il PIN duress ha conseguenze irreversibili quando digitato. Un PIN a quattro cifre banale potrebbe essere indovinato per caso da un ladro che prova le combinazioni ovvie, o digitato da un familiare, facendo partire un rilascio reale.
+**The signature is inside the chain hash.**
+This binds the sequence to its provenance: a signature cannot be replaced without breaking the chain, nor can events be reordered without invalidating the signatures.
+
+**`chain_index` and `timestamp_ms` are in the hash; the autoincrement `id` is not.**
+`chain_index` prevents deletion of intermediate events with renumbering; `timestamp_ms` prevents reordering. The database `id` is excluded because the client, which verifies locally, does not know it — including it would make verification non-deterministic.
+
+**Chain writes are best-effort.**
+Every `appendToChain` is wrapped in `try/catch` and is not transactional with the main action. An audit failure must not prevent the user from arming or disarming a switch. Declared consequence: in case of a crash between the action and the audit, an event may be missing. Availability of the action was preferred over completeness of the log.
+
+**The anchor is manual.**
+The app displays the current hash and invites the user to save it outside the system. No automatic publication to blockchains or third-party services: it would introduce costs, dependencies and — above all — a metadata pattern that would reveal the use of Sentinella to an observer.
+
+---
+
+## Coercion
+
+**Biometrics excluded from unlock.**
+Counter-intuitive compared to common practice, but necessary: a fingerprint can be obtained by physical force, a PIN cannot. If the app unlocked with a fingerprint, neither duress mode would ever trigger. Biometrics remain only for accessing the duress configuration, where the user is not under coercion.
+
+**A single PIN for unlock and seed access.**
+Under stress, fewer secrets to remember means fewer mistakes. The user has to keep two PINs in mind: the real one and the emergency one.
+
+**A facade with fake data, not an empty account.**
+A completely empty account is suspicious ("why do you have this app if there's nothing in it?"). The facade shows a disarmed switch and fictitious contacts marked as verified: a user who tried the tool without really using it.
+
+**The facade is entirely local.**
+A central guard in the request function intercepts every call — including signed ones, which go through the same function — and returns a generic network error. The server receives no traffic while the facade is active: verified in the field by watching the logs for the entire duration of a Mode A session.
+
+**The facade persists across restarts.**
+If the coercer powers the device off and on again and forces a new unlock, they must see the same fake data. A facade that resets would show different data on the second access, betraying the fiction.
+
+**Exact typed confirmations for catastrophic actions.**
+Activating Mode B requires typing `HO CAPITO`; starting recovery after a failed verification requires `AVVIA RECOVERY`. Strict comparison, case-sensitive, no normalization. A single tap on an alert is too easy to give out of panic or by mistake, and these actions are irreversible or costly.
+
+**The rate limit on the trigger is silent.**
+The fourth trigger in a day receives a `429` and the app shows nothing different. Revealing the existence of a limit would tell the coercer that a hidden mechanism exists.
+
+**Blacklist of common PINs and a minimum length.**
+The duress PIN has irreversible consequences when entered. A trivial four-digit PIN could be guessed by chance by a thief trying the obvious combinations, or typed by a family member, triggering a real release.
 
 ---
 
 ## Storage
 
-**Il provider non conosce le chiavi.**
-L'interfaccia di storage riceve e restituisce byte già cifrati. Google Drive conserva materiale opaco: verificato aprendo un blob dal browser e constatando che è illeggibile.
+**The provider does not know the keys.**
+The storage interface receives and returns already-encrypted bytes. Google Drive stores opaque material: verified by opening a blob from the browser and confirming it is unreadable.
 
-**Ambito Drive minimo (`drive.file`).**
-L'app accede solo ai file che ha creato, non all'intero Drive dell'utente.
+**Minimal Drive scope (`drive.file`).**
+The app accesses only the files it created, not the user's entire Drive.
 
-**Login e refresh usano lo stesso client OAuth.**
-Ottenere i token con un client e rinnovarli con un altro produce un rifiuto da parte di Google alla scadenza del primo token — un guasto che si manifesterebbe solo dopo un'ora di utilizzo, difficile da diagnosticare.
+**Login and refresh use the same OAuth client.**
+Obtaining tokens with one client and refreshing them with another produces a rejection from Google when the first token expires — a failure that would only surface after an hour of use, hard to diagnose.
 
-**Armare richiede uno storage connesso.**
-Senza un provider attivo non esiste un luogo dove collocare il pacchetto. L'app blocca l'armo e guida alla connessione, invece di fallire più avanti nel flusso.
+**Arming requires a connected storage.**
+Without an active provider there is no place to put the package. The app blocks arming and guides the user through connecting, instead of failing later in the flow.
 
-**Disconnettere Drive è impedito con switch armati.**
-I blob dei pacchetti attivi risiedono su Drive: disconnettere renderebbe il pacchetto irrecuperabile per i contatti al momento del rilascio. La verifica è *fail-safe*: se lo stato non è determinabile (per esempio rete assente), la disconnessione viene comunque bloccata.
+**Disconnecting Drive is prevented while switches are armed.**
+The blobs of active packages live on Drive: disconnecting would make the package unrecoverable for the contacts at release time. The check is *fail-safe*: if the state cannot be determined (for example, no network), disconnection is blocked anyway.
 
 ---
 
-## Errori e informazione
+## Errors and information
 
-**L'error handler distingue i 4xx leciti dai 5xx interni.**
-I codici informativi (400, 401, 409, 413, 415, 429...) raggiungono il client con il proprio messaggio; tutto il resto diventa un `500` generico con lo stack registrato solo lato server. Mascherare anche i 4xx rendeva impossibile il debug lato client senza aggiungere sicurezza.
+**The error handler distinguishes legitimate 4xx from internal 5xx.**
+Informative codes (400, 401, 409, 413, 415, 429...) reach the client with their own message; everything else becomes a generic `500` with the stack trace logged server-side only. Masking the 4xx as well made client-side debugging impossible without adding security.
 
-**Le rotte di sviluppo non vengono registrate in produzione.**
-Il controllo avviene all'inizio della funzione di registrazione, non dentro ciascuna rotta: in produzione gli endpoint semplicemente non esistono e rispondono `404`, indistinguibile da un percorso inesistente. Un `403` rivelerebbe che la funzione esiste ma è disabilitata.
+**Development routes are not registered in production.**
+The check happens at the start of the registration function, not inside each route: in production the endpoints simply do not exist and respond `404`, indistinguishable from a nonexistent path. A `403` would reveal that the feature exists but is disabled.
 
-**Validazione con rifiuto dei campi non previsti.**
-Venti schemi con modalità stretta. La validazione è posta dopo l'autenticazione, così una richiesta non firmata riceve `401` e non `400`: non si rivela la forma attesa del payload a chi non è autenticato.
+**Validation rejects unexpected fields.**
+Twenty schemas in strict mode. Validation is placed after authentication, so an unsigned request receives `401` and not `400`: the expected shape of the payload is not revealed to unauthenticated parties.

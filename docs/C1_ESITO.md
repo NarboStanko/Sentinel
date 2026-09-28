@@ -1,32 +1,34 @@
-# C1 — Esito dell'indagine: la KDF per i PIN richiede un modulo nativo
+# C1 — Investigation outcome: the KDF for PINs requires a native module
 
-**Stato:** NON risolto in autonomia — rimandato all'audit professionale con raccomandazione motivata.
+> 🇬🇧 English · [🇮🇹 Italiano](C1_ESITO.it.md)
 
-## Il problema
-`app/lib/pinHash.ts` usa una singola sha256(salt + pin). Per un PIN di 6 cifre (10^6 combinazioni): brute-force offline istantaneo per chi estrae il record da SecureStore; un'analisi forense recupera gli hash del PIN normale e del PIN duress, li brute-forza entrambi all'istante e li distingue → l'indistinguibilità del duress crolla a livello di storage. Serve una KDF lenta.
+**Status:** NOT resolved independently — deferred to the professional audit with a reasoned recommendation.
 
-## Benchmark su dispositivo reale (Hermes)
-KDF in JavaScript puro (@noble/hashes) — INUTILIZZABILE:
-- scrypt N=8192: ~6.300 ms (telefono veloce)
-- scrypt N=16384: ~12.600 ms
-- scrypt N=32768: ~25.000 ms
-- PBKDF2 50.000 iter: ~6.300 ms
-- PBKDF2 100.000 iter: ~13.000 ms
-- PBKDF2 600.000 iter (OWASP 2023): ~102.000 ms
+## The problem
+`app/lib/pinHash.ts` uses a single sha256(salt + pin). For a 6-digit PIN (10^6 combinations): instant offline brute-force for anyone who extracts the record from SecureStore; a forensic analysis recovers the hashes of the normal PIN and the duress PIN, brute-forces both instantly and tells them apart → the indistinguishability of the duress PIN collapses at the storage level. A slow KDF is needed.
 
-Iterazione di SHA-256 nativo (expo-crypto digest in loop) — PRATICABILE MA MEDIOCRE:
-- 1.000 iter: 79 ms (veloce) / 436 ms (lento)
-- 5.000 iter: 333 ms / 867 ms
-- 10.000 iter: 636 ms / 1.744 ms
-- 20.000 iter: 1.195 ms / 3.386 ms
+## Benchmark on a real device (Hermes)
+KDF in pure JavaScript (@noble/hashes) — UNUSABLE:
+- scrypt N=8192: ~6,300 ms (fast phone)
+- scrypt N=16384: ~12,600 ms
+- scrypt N=32768: ~25,000 ms
+- PBKDF2 50,000 iter: ~6,300 ms
+- PBKDF2 100,000 iter: ~13,000 ms
+- PBKDF2 600,000 iter (OWASP 2023): ~102,000 ms
 
-Osservazione: sul telefono lento il costo è dominato da un overhead fisso del bridge JS-nativo (~330-436ms per avviare), non dal lavoro crittografico. Ogni chiamata digest attraversa il bridge React Native. Si paga molto tempo per poca robustezza. expo-crypto (già installato) espone solo primitive (getRandomBytes, digestStringAsync, digest, getRandomValues, randomUUID): nessuna KDF con iterazioni.
+Iterating native SHA-256 (expo-crypto digest in a loop) — FEASIBLE BUT MEDIOCRE:
+- 1,000 iter: 79 ms (fast) / 436 ms (slow)
+- 5,000 iter: 333 ms / 867 ms
+- 10,000 iter: 636 ms / 1,744 ms
+- 20,000 iter: 1,195 ms / 3,386 ms
 
-## Perché l'iterazione di SHA-256 non basta
-È essenzialmente PBKDF1: non memory-hard. Un attaccante con GPU/ASIC parallelizza e aggira il beneficio (Argon2/scrypt costringono a usare memoria, neutralizzando le GPU). Con ~3.000 iterazioni (limite pratico per restare sotto ~600ms sul telefono lento) il brute-force diventa ~3.000x più costoso: miglioramento reale ma modesto contro un avversario con risorse — e il threat model include avversari con risorse. Introdurla darebbe un falso senso di "risolto".
+Observation: on the slow phone the cost is dominated by a fixed JS-native bridge overhead (~330-436 ms just to start), not by the cryptographic work. Every digest call crosses the React Native bridge. You pay a lot of time for little robustness. expo-crypto (already installed) exposes only primitives (getRandomBytes, digestStringAsync, digest, getRandomValues, randomUUID): no KDF with iterations.
 
-## Raccomandazione per l'audit
-Soluzione corretta: Argon2id via modulo nativo (una singola chiamata nativa fa tutto, senza attraversare il bridge N volte → veloce e memory-hard). Richiede: una libreria KDF nativa affidabile per React Native/Expo (da valutare con competenza di sicurezza), un development build, e l'audit della libreria stessa. Domande per l'auditor: (1) quale libreria Argon2/scrypt nativa è affidabile e mantenuta? (2) parametri Argon2id per un PIN a 6 cifre in questo threat model? (3) l'iterazione di SHA-256 nativo (~3.000 iter) è un tampone accettabile nel frattempo? (4) strategia di migrazione dei PIN esistenti e blindatura dell'uniformità normale/duress.
+## Why iterating SHA-256 is not enough
+It is essentially PBKDF1: not memory-hard. An attacker with GPUs/ASICs parallelizes and bypasses the benefit (Argon2/scrypt force the use of memory, neutralizing GPUs). With ~3,000 iterations (the practical limit to stay under ~600 ms on the slow phone) brute-force becomes ~3,000x more expensive: a real but modest improvement against a well-resourced adversary — and the threat model includes well-resourced adversaries. Introducing it would give a false sense of "solved".
 
-## Migrazione (quando si implementerà, qualunque KDF)
-Formato hash versionato: v1$<sha256> legacy, v2$<params>$<hash> nuovo. Verifica che legge il prefisso e usa il metodo giusto. PUNTO CRITICO duress: la migrazione deve mantenere PIN normale e PIN duress sempre nella stessa versione — mai uno v1 e uno v2 — altrimenti un analista forense deduce l'esistenza del secondo PIN. Approccio più sicuro: nuovi PIN in v2; per gli esistenti, operazione esplicita "aggiorna sicurezza PIN" che richiede di reinserire tutti i PIN insieme e li riscrive uniformemente. Ri-test obbligatorio di entrambe le modalità duress dopo la migrazione.
+## Recommendation for the audit
+Correct solution: Argon2id via a native module (a single native call does everything, without crossing the bridge N times → fast and memory-hard). Requires: a trustworthy native KDF library for React Native/Expo (to be evaluated with security expertise), a development build, and an audit of the library itself. Questions for the auditor: (1) which native Argon2/scrypt library is trustworthy and maintained? (2) Argon2id parameters for a 6-digit PIN in this threat model? (3) is iterating native SHA-256 (~3,000 iter) an acceptable stopgap in the meantime? (4) migration strategy for existing PINs and hardening of the normal/duress uniformity.
+
+## Migration (when implemented, whatever the KDF)
+Versioned hash format: v1$<sha256> legacy, v2$<params>$<hash> new. Verification reads the prefix and uses the right method. CRITICAL POINT for duress: the migration must keep the normal PIN and the duress PIN always at the same version — never one v1 and one v2 — otherwise a forensic analyst infers the existence of the second PIN. Safer approach: new PINs in v2; for existing ones, an explicit "upgrade PIN security" operation that requires re-entering all PINs together and rewrites them uniformly. Mandatory re-test of both duress modes after the migration.

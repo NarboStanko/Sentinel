@@ -1,165 +1,167 @@
-# Sentinella — Modello di recovery dell'identità
+# Sentinella — Identity recovery model
 
-**Stato:** analisi completata, decisione presa (Opzione 1), Parte A fatta (commit 6b4851e), flusso server validato in test parziale. Parti C/D/E da fare in sessione dedicata (vedi sezione 6). Prima di riprendere: reset pulito di DB + telefoni.
-**Perché documentato:** tocca il flusso di sicurezza più delicato del sistema (recupero dell'identità). Un errore qui = utente perde l'accesso, o attaccante ruba un account. Merita mente fresca e, idealmente, un occhio dell'audit professionale.
+> 🇬🇧 English · [🇮🇹 Italiano](RECOVERY_MODEL.it.md)
 
----
-
-## 1. Due meccanismi distinti (non confonderli)
-
-Sentinella ha DUE modi di riprendere il controllo dopo la perdita del telefono. Servono a casi diversi.
-
-### Restore da seed (già funzionante, testato E2E)
-- **Presupposto:** hai ancora la seed phrase.
-- **Come:** su un nuovo device reinserisci la seed → `identityFromSeed` rigenera la STESSA chiave (priv/pub derivano dalla seed). Challenge-response (`/auth/challenge` + `/auth/verify`) prova il possesso. Rientri subito.
-- **Nessun quorum, nessun ritardo.** Se hai la seed, sei tu, punto.
-- File: `restore.tsx`, `auth.ts`.
-
-### Social recovery (rotazione chiave, DIFETTOSO oggi)
-- **Presupposto CORRETTO:** hai perso il telefono E la seed. Hai una NUOVA seed → nuova identità (chiave B, ownerId_B).
-- **Scopo:** trasferire il controllo del vecchio account (ownerId_X, controllato dalla chiave A perduta) alla nuova chiave B.
-- **Come:** `/recovery/initiate` (fissa la new_public_key = B) → i contatti approvano (`/recovery/approve`, quorum = recovery_k) → ritardo 7gg → `/recovery/finalize` ruota `users.public_key` da A a B.
-- **Invariante server (finalize):** ruota SOLO la chiave pubblica. Non tocca DEK, quote Shamir, stato switch. Gli switch continuano a girare, le quote (sigillate ai contatti) restano valide.
-- **Freni:** bloccato se uno switch è in GRACE/APPROVAL_PENDING; annullabile (`/recovery/cancel`) da chi possiede ancora la chiave A (firma il recoveryId).
-- File: `recovery.ts`, `social-recovery.tsx`.
-
-**Chiarezza fondamentale:** i contatti NON ti ridanno l'identità (la chiave A derivata dalla seed persa è irrecuperabile per sempre). Autorizzano il TRASFERIMENTO dell'account alla nuova chiave B.
+**Status:** analysis complete, decision made (Option 1), Part A done (commit 6b4851e), server flow validated in a partial test. Parts C/D/E to be done in a dedicated session (see section 6). Before resuming: clean reset of DB + phones.
+**Why documented:** it touches the most delicate security flow in the system (identity recovery). A mistake here = the user loses access, or an attacker steals an account. It deserves a fresh mind and, ideally, a professional auditor's eye.
 
 ---
 
-## 2. I difetti di modello del social recovery attuale
+## 1. Two distinct mechanisms (do not confuse them)
 
-### Difetto 1 — Il device nuovo non conosce il vecchio ownerId
-`social-recovery.tsx` InitiateSection fa `loadOwnerId()` + `identityFromSeed(loadSeed())` del device CORRENTE. Ma nello scenario reale (device nuovo, seed nuova), `loadOwnerId()` è il NUOVO ownerId, non il vecchio ownerId_X da recuperare. Il testo UI dice "hai accesso alla seed phrase" — che è il caso del RESTORE, non del recovery. Ambiguità reale.
+Sentinella has TWO ways to regain control after losing the phone. They serve different cases.
 
-**Decisione presa:** il vecchio ownerId lo forniscono i contatti. Loro ce l'hanno nei propri contatti fidati.
-**Scoperta successiva (semplifica):** il contatto NON deve comunicarlo manualmente. `ApproveSection` usa `recoveryPendingForContact` — il server mostra automaticamente al contatto le richieste di recovery pendenti che lo riguardano (autenticato con la firma del contatto). Quindi il flusso di approvazione è già automatico. Resta da risolvere come il DEVICE CHE AVVIA specifica ownerId_X: la UI initiate deve CHIEDERE il vecchio ownerId (campo input), non usare loadOwnerId().
+### Restore from seed (already working, tested E2E)
+- **Assumption:** you still have the seed phrase.
+- **How:** on a new device you re-enter the seed → `identityFromSeed` regenerates the SAME key (priv/pub are derived from the seed). Challenge-response (`/auth/challenge` + `/auth/verify`) proves possession. You are back in immediately.
+- **No quorum, no delay.** If you have the seed, you are you, period.
+- Files: `restore.tsx`, `auth.ts`.
 
-### Difetto 2 — La fiducia dei contatti punta ancora alla chiave A (IL NODO CRITICO)
-Il contatto salta in SecureStore `verified_owner_key = A` (keystore.ts:83, singola stringa), verificata DI PERSONA al pairing. `approve.tsx` confronta la chiave owner con questa copia locale ("Chiave owner non verificata. Ripeti il pairing di persona").
+### Social recovery (key rotation, BROKEN today)
+- **CORRECT assumption:** you have lost the phone AND the seed. You have a NEW seed → new identity (key B, ownerId_B).
+- **Purpose:** transfer control of the old account (ownerId_X, controlled by the lost key A) to the new key B.
+- **How:** `/recovery/initiate` (pins the new_public_key = B) → contacts approve (`/recovery/approve`, quorum = recovery_k) → 7-day delay → `/recovery/finalize` rotates `users.public_key` from A to B.
+- **Server invariant (finalize):** rotates ONLY the public key. It does not touch the DEK, the Shamir shares, or switch state. Switches keep running; the shares (sealed to the contacts) remain valid.
+- **Brakes:** blocked if a switch is in GRACE/APPROVAL_PENDING; cancelable (`/recovery/cancel`) by whoever still holds key A (signs the recoveryId).
+- Files: `recovery.ts`, `social-recovery.tsx`.
 
-Dopo la rotazione, il server ha B ma ogni contatto ha ancora A localmente → il confronto fallisce → il contatto NON può più operare per il nuovo owner.
-
-**Come il contatto passa da A a B?** Questa è LA decisione di sicurezza del recovery.
-
----
-
-## 3. Decisione: Opzione 1 (social trust)
-
-**Scelta:** l'approvazione del recovery È la nuova verifica. Quando il contatto approva (atto esplicito, firmato col suo device) e il recovery viene finalizzato, l'app del contatto aggiorna localmente `verified_owner_key` da A a B.
-
-**Sicurezza affidata a:** quorum (k contatti devono approvare) + ritardo 7gg + cancel firmato con la chiave A.
-
-**Trade-off accettato:** il contatto NON confronta di persona il safety number di B. Si fida che chi ha avviato il recovery sia l'owner, basandosi sul fatto che conosce ownerId_X e che il quorum è d'accordo. È il modello dei social recovery wallet (Argent, ecc.).
-
-**Rischio residuo documentato:** se un attaccante (a) scopre ownerId_X, (b) inganna/compromette k contatti, (c) l'owner non annulla entro 7gg (perché ha davvero perso la chiave A, quindi non PUÒ annullare) → furto dell'account. Difesa = quorum + finestra di 7gg. Per k=2 con avversario capace è un rischio reale ma non banale. **Questa è la classe di rischio che l'audit professionale dovrebbe validare.**
-
-**Opzioni scartate:**
-- Opzione 2 (ri-verifica di persona di B): sicurissima ma svuota il senso del recovery (se devi reincontrare tutti, tanto vale rifare il pairing).
-- Opzione 3 (ripristina accesso ma non fiducia contatti): nel caso Sentinella, dove lo scopo È coinvolgere i contatti, lascia il sistema mezzo funzionante.
+**Fundamental clarity:** the contacts do NOT give you your identity back (key A, derived from the lost seed, is unrecoverable forever). They authorize the TRANSFER of the account to the new key B.
 
 ---
 
-## 4. Piano di implementazione (per gradi, con gate e commit separati)
+## 2. The model flaws of the current social recovery
 
-Ogni parte va testata e committata prima della successiva. La Parte C è quella pericolosa: testare E2E con cura.
+### Flaw 1 — The new device does not know the old ownerId
+`social-recovery.tsx` InitiateSection does `loadOwnerId()` + `identityFromSeed(loadSeed())` of the CURRENT device. But in the real scenario (new device, new seed), `loadOwnerId()` is the NEW ownerId, not the old ownerId_X to be recovered. The UI text says "you have access to the seed phrase" — which is the RESTORE case, not recovery. Real ambiguity.
 
-### Parte A — UI initiate chiede il vecchio ownerId (Difetto 1)
-- `social-recovery.tsx` InitiateSection: aggiungi un campo input "ownerId da recuperare". Non usare `loadOwnerId()` del device.
-- `identityFromSeed(loadSeed())` resta (la nuova chiave B è quella del device nuovo). Ma l'ownerId target viene dall'input.
+**Decision made:** the old ownerId is provided by the contacts. They have it in their own trusted contacts.
+**Later discovery (simplifies things):** the contact does NOT need to communicate it manually. `ApproveSection` uses `recoveryPendingForContact` — the server automatically shows the contact the pending recovery requests that concern them (authenticated with the contact's signature). So the approval flow is already automatic. What remains to be solved is how the INITIATING DEVICE specifies ownerId_X: the initiate UI must ASK for the old ownerId (input field), not use loadOwnerId().
+
+### Flaw 2 — The contacts' trust still points to key A (THE CRITICAL KNOT)
+The contact stores in SecureStore `verified_owner_key = A` (keystore.ts:83, a single string), verified IN PERSON at pairing. `approve.tsx` compares the owner key against this local copy ("Owner key not verified. Repeat the in-person pairing").
+
+After the rotation, the server has B but every contact still has A locally → the comparison fails → the contact can NO longer operate for the new owner.
+
+**How does the contact move from A to B?** This is THE security decision of the recovery.
+
+---
+
+## 3. Decision: Option 1 (social trust)
+
+**Choice:** approving the recovery IS the new verification. When the contact approves (an explicit act, signed with their device) and the recovery is finalized, the contact's app locally updates `verified_owner_key` from A to B.
+
+**Security entrusted to:** quorum (k contacts must approve) + 7-day delay + cancel signed with key A.
+
+**Accepted trade-off:** the contact does NOT compare B's safety number in person. They trust that whoever initiated the recovery is the owner, based on the fact that they know ownerId_X and that the quorum agrees. This is the model of social recovery wallets (Argent, etc.).
+
+**Documented residual risk:** if an attacker (a) discovers ownerId_X, (b) deceives/compromises k contacts, (c) the owner does not cancel within 7 days (because they really did lose key A, so they CANNOT cancel) → account theft. Defense = quorum + 7-day window. For k=2 against a capable adversary this is a real, non-trivial risk. **This is the risk class that the professional audit should validate.**
+
+**Discarded options:**
+- Option 2 (in-person re-verification of B): very secure but hollows out the point of recovery (if you have to meet everyone again, you might as well redo the pairing).
+- Option 3 (restore access but not contact trust): in the Sentinella case, where the whole purpose IS involving the contacts, it leaves the system half-working.
+
+---
+
+## 4. Implementation plan (in stages, with gates and separate commits)
+
+Each part must be tested and committed before the next. Part C is the dangerous one: test E2E with care.
+
+### Part A — Initiate UI asks for the old ownerId (Flaw 1)
+- `social-recovery.tsx` InitiateSection: add an input field "ownerId to recover". Do not use the device's `loadOwnerId()`.
+- `identityFromSeed(loadSeed())` stays (the new key B is the new device's key). But the target ownerId comes from the input.
 - `api.recoveryInitiate(ownerIdInput, newPubHex)`.
-- Chiarire il testo: "Usa questa sezione se hai perso telefono E seed. Inserisci il tuo vecchio ID account (te lo comunicano i tuoi contatti fidati)."
+- Clarify the text: "Use this section if you lost both phone AND seed. Enter your old account ID (your trusted contacts can tell it to you)."
 
-### Parte B — (già coperta)
-Il contatto vede le richieste pendenti automaticamente via `recoveryPendingForContact`. Verificare solo che la lista mostri abbastanza contesto (nome owner, data) per un'approvazione consapevole. Eventuale: mostrare al contatto l'ownerId dell'owner in recovery, così può comunicarlo (utile per la Parte A).
+### Part B — (already covered)
+The contact sees pending requests automatically via `recoveryPendingForContact`. Only verify that the list shows enough context (owner name, date) for an informed approval. Optionally: show the contact the ownerId of the owner under recovery, so they can communicate it (useful for Part A).
 
-### Parte C — Aggiornamento fiducia post-finalizzazione (Difetto 2, IL CUORE)
-- Alla finalizzazione del recovery, l'app di OGNI contatto che ha approvato deve aggiornare `verified_owner_key` da A a B.
-- **Problema:** il contatto come sa che il recovery è stato finalizzato e qual è B? Opzioni:
-  - Il contatto, quando apre l'app, controlla lo stato dei recovery che ha approvato; se finalizzato, legge la new_public_key (B) dal server e aggiorna la copia locale.
-  - **ATTENZIONE sicurezza:** leggere B "dal server" e fidarsi ciecamente reintrodurrebbe il rischio che un server compromesso sostituisca la chiave. MA nel modello Opzione 1 la fiducia viene dall'aver approvato: il contatto aggiorna a B SOLO se ha una `recovery_approvals` sua per quel recovery, e B = la new_public_key che era fissata all'initiate (immutabile). Verificare che new_public_key non sia modificabile dopo l'initiate.
-  - Serve un endpoint tipo `/recovery/status` che, per un contatto autenticato che ha approvato, ritorna { finalized, newPublicKey }.
-- Dopo l'aggiornamento locale, `approve.tsx` confronterà con B e funzionerà.
-- **Test E2E obbligatorio:** dopo il recovery, il contatto deve poter approvare un rilascio del NUOVO owner senza "chiave non verificata".
+### Part C — Trust update after finalization (Flaw 2, THE HEART)
+- Upon finalization of the recovery, the app of EVERY contact who approved must update `verified_owner_key` from A to B.
+- **Problem:** how does the contact know that the recovery has been finalized and what B is? Options:
+  - The contact, when opening the app, checks the status of the recoveries they approved; if finalized, they read the new_public_key (B) from the server and update the local copy.
+  - **Security WARNING:** reading B "from the server" and trusting it blindly would reintroduce the risk of a compromised server substituting the key. BUT in the Option 1 model trust comes from having approved: the contact updates to B ONLY if they have their own `recovery_approvals` entry for that recovery, and B = the new_public_key that was pinned at initiate (immutable). Verify that new_public_key cannot be modified after initiate.
+  - An endpoint like `/recovery/status` is needed which, for an authenticated contact who approved, returns { finalized, newPublicKey }.
+- After the local update, `approve.tsx` will compare against B and will work.
+- **Mandatory E2E test:** after the recovery, the contact must be able to approve a release of the NEW owner without "key not verified".
 
-### Parte D — Test E2E completo
-- Ritardo: `initiate` non espone delaySec dal client (usa default 7gg). Per testare, forzare `unlock_at` nel DB dopo l'initiate:
-  `UPDATE recoveries SET unlock_at = 0 WHERE id = '<recoveryId>';` (script .cjs)
-- Coreografia: T1 = owner (chiave A). Simula perdita: nuovo device/reset con NUOVA seed → chiave B. Initiate verso ownerId_X (vecchio). T2/T3 approvano. Forza unlock_at=0. Finalize. Verifica: B controlla l'account; T2/T3 possono operare per B (Parte C funziona).
+### Part D — Full E2E test
+- Delay: `initiate` does not expose delaySec from the client (uses the 7-day default). To test, force `unlock_at` in the DB after initiate:
+  `UPDATE recoveries SET unlock_at = 0 WHERE id = '<recoveryId>';` (.cjs script)
+- Choreography: T1 = owner (key A). Simulate loss: new device/reset with a NEW seed → key B. Initiate toward ownerId_X (old). T2/T3 approve. Force unlock_at=0. Finalize. Verify: B controls the account; T2/T3 can operate for B (Part C works).
 
-### Parte E — UI quorum recovery_k (l'obiettivo ORIGINALE di C3 fase 2)
-- Solo DOPO che il recovery funziona E2E col default 2.
-- UI dove l'utente sceglie recovery_k (limitato al numero di contatti). Endpoint dedicato che aggiorna users.recovery_k, disaccoppiato dalla soglia contenuto (C3 fase 1 già fatto).
-- Spiegare bene la differenza tra "contatti per liberare i documenti" (k contenuto) e "contatti per recuperare l'identità" (recovery_k), o l'utente li confonde.
-
----
-
-## 5. Note di sicurezza per l'audit
-
-- Validare il modello Opzione 1: il rischio "k contatti ingannati + owner non può annullare" è accettabile per il threat model?
-- `/recovery/initiate` è anonimo (chi ha perso la chiave non può firmare). Chiunque conosca un ownerId può avviare un recovery. Difesa: quorum + ritardo + cancel. Validare.
-- `/recovery/finalize` è anonimo ma innocuo (ruota comunque verso la new_public_key già fissata; i controlli ritardo+quorum+no-inflight fanno il lavoro).
-- Verificare che `new_public_key` sia IMMUTABILE dopo l'initiate (se modificabile, un attaccante potrebbe cambiare il target dopo che i contatti hanno approvato).
-- Parte C: l'aggiornamento della fiducia locale deve avvenire SOLO per contatti che hanno effettivamente approvato, e verso la new_public_key immutabile — mai una chiave arbitraria fornita dal server.
+### Part E — recovery_k quorum UI (the ORIGINAL goal of C3 phase 2)
+- Only AFTER the recovery works E2E with the default of 2.
+- UI where the user chooses recovery_k (bounded by the number of contacts). Dedicated endpoint that updates users.recovery_k, decoupled from the content threshold (C3 phase 1 already done).
+- Explain clearly the difference between "contacts to release the documents" (content k) and "contacts to recover the identity" (recovery_k), or the user will confuse them.
 
 ---
 
-## 6. Esito test parziale (sessione di analisi)
+## 5. Security notes for the audit
 
-**Parte A: FATTA e committata (6b4851e).** InitiateSection ora chiede il vecchio ownerId via input invece di usare loadOwnerId() del device. Testo UI chiarito (scenario "telefono E seed persi"). tsc pulito. Fiducia contatti NON toccata.
+- Validate the Option 1 model: is the risk "k deceived contacts + owner cannot cancel" acceptable for the threat model?
+- `/recovery/initiate` is anonymous (whoever lost the key cannot sign). Anyone who knows an ownerId can initiate a recovery. Defense: quorum + delay + cancel. Validate.
+- `/recovery/finalize` is anonymous but harmless (it rotates toward the already-pinned new_public_key anyway; the delay+quorum+no-inflight checks do the work).
+- Verify that `new_public_key` is IMMUTABLE after initiate (if modifiable, an attacker could change the target after the contacts have approved).
+- Part C: the local trust update must happen ONLY for contacts who actually approved, and toward the immutable new_public_key — never an arbitrary key provided by the server.
 
-**Flusso server initiate→approve→finalize: VALIDATO (test parziale, ritardo forzato).**
-- Avviato recovery da device con Parte A, inserito ownerId di T1 (usr_mglsq2pN0o).
-- Contatti hanno approvato (quorum raggiunto).
-- unlock_at forzato a 0 nel DB (bypass ritardo 7gg, trucco dev).
-- finalize eseguito: `users.public_key` ruotata correttamente alla new_public_key (verificato: user.public_key === rec.new_public_key, finalized=1).
-- CONCLUSIONE: la meccanica server della rotazione funziona.
+---
 
-**Muro della Parte C: CONFERMATO empiricamente.**
-- Dopo la rotazione, T1 (che aveva la chiave A) non può più armare: il server riconosce come owner la chiave B, non più A. I device con la vecchia relazione di fiducia sono disallineati.
-- Questo conferma il Difetto 2: la rotazione lato server NON aggiorna la fiducia locale dei contatti (verified_owner_key resta A). Serve la Parte C per riallineare.
+## 6. Partial test outcome (analysis session)
 
-**Caveat del test:** lo scenario "device nuovo con seed nuova" NON è stato simulato pulito — la new_public_key usata (034abb...) era un'identità già esistente nello scenario, non una chiave vergine. Il DB e i telefoni sono ora in stato "sporco" (identità mescolate, rotazione senza Parte C).
+**Part A: DONE and committed (6b4851e).** InitiateSection now asks for the old ownerId via input instead of using the device's loadOwnerId(). UI text clarified ("phone AND seed lost" scenario). tsc clean. Contact trust NOT touched.
 
-**Per la prossima sessione (Parte C + D):**
-1. RIPARTIRE da DB e telefoni PULITI (reset completo: cancella sentinella.db*, ricrea, cancella dati app sui 3 telefoni, rifai onboarding + pairing con verifica di persona).
-2. Simulare pulito: un device dedicato (o T1 resettato) con una seed NUOVA = chiave B vergine. Gli altri due = contatti che approvano.
-3. Implementare Parte C (vedi sezione 4): endpoint /recovery/status che per un contatto che ha approvato ritorna {finalized, newPublicKey}; l'app del contatto, alla finalizzazione, aggiorna verified_owner_key da A a B SOLO se ha approvato E verso la new_public_key immutabile. Verificare prima che new_public_key sia immutabile dopo l'initiate.
-4. Test E2E completo: dopo il recovery, il contatto DEVE poter operare per il nuovo owner (B) senza "chiave non verificata".
-5. Poi Parte E (UI quorum recovery_k), l'obiettivo originale di C3 fase 2.
+**Server flow initiate→approve→finalize: VALIDATED (partial test, delay forced).**
+- Recovery started from a device with Part A, entered T1's ownerId (usr_mglsq2pN0o).
+- Contacts approved (quorum reached).
+- unlock_at forced to 0 in the DB (bypass of the 7-day delay, dev trick).
+- finalize executed: `users.public_key` correctly rotated to the new_public_key (verified: user.public_key === rec.new_public_key, finalized=1).
+- CONCLUSION: the server-side rotation mechanics work.
 
-## 7. REVISIONE — la lettura del codice ribalta la Parte C
+**The Part C wall: CONFIRMED empirically.**
+- After the rotation, T1 (which had key A) can no longer arm: the server recognizes key B as the owner, no longer A. Devices with the old trust relationship are misaligned.
+- This confirms Flaw 2: the server-side rotation does NOT update the contacts' local trust (verified_owner_key remains A). Part C is needed to realign.
 
-**Scoperta: il "muro Parte C" per i contatti NON esiste. La Parte C (aggiornare la fiducia dei contatti) NON serve.**
+**Test caveat:** the "new device with new seed" scenario was NOT simulated cleanly — the new_public_key used (034abb...) was an identity already existing in the scenario, not a fresh key. The DB and phones are now in a "dirty" state (mixed identities, rotation without Part C).
 
-Analisi del codice reale:
-- approve.tsx: il contatto carica verifiedOwnerKey ma lo usa SOLO come gate di esistenza (if (!verifiedOwnerKey)), NON lo confronta con la chiave owner del server. Commento nel codice (riga 29-30): "non usa mai la chiave owner dal payload push o dal server". Le operazioni del contatto (findMyShare con id.priv, decifratura, submit) usano la PROPRIA chiave privata, mai quella dell'owner.
-- p256.verify non è chiamato da nessuna schermata client per validare firme dell'owner.
-- approvals.ts (server): le approvazioni lavorano per switchId e quote cifrate (intestate alla chiave del contatto); il legame contatto-owner è per owner_id, IMMUTABILE nella rotazione (cambia solo public_key).
+**For the next session (Part C + D):**
+1. START OVER from a CLEAN DB and phones (full reset: delete sentinella.db*, recreate, wipe app data on the 3 phones, redo onboarding + pairing with in-person verification).
+2. Simulate cleanly: one dedicated device (or a reset T1) with a NEW seed = fresh key B. The other two = contacts who approve.
+3. Implement Part C (see section 4): /recovery/status endpoint that, for a contact who approved, returns {finalized, newPublicKey}; the contact's app, upon finalization, updates verified_owner_key from A to B ONLY if they approved AND toward the immutable new_public_key. First verify that new_public_key is immutable after initiate.
+4. Full E2E test: after the recovery, the contact MUST be able to operate for the new owner (B) without "key not verified".
+5. Then Part E (recovery_k quorum UI), the original goal of C3 phase 2.
 
-Conseguenza: dopo la rotazione A→B il contatto continua a operare senza modifiche. Nessun fix lato contatto.
+## 7. REVISION — reading the code overturns Part C
 
-Reinterpretazione del "muro" osservato: T1 non poteva più armare perché aveva la VECCHIA chiave A e il server riconosce ora B come owner. Comportamento CORRETTO (il vecchio device non è più l'owner), non un difetto.
+**Discovery: the "Part C wall" for the contacts does NOT exist. Part C (updating the contacts' trust) is NOT needed.**
 
-**Il difetto VERO (e anche del restore-da-seed su device nuovo):**
-- restore.tsx ripristina ownerId + switchId dal server (authVerify ritorna anche switches), ma NON ripristina verified_contact_keys (locali in SecureStore, persi col vecchio device).
-- compose.tsx: per armare, un contatto scelto deve essere in verifiedKeys (verificato di persona). Su device nuovo è VUOTO.
-- Quindi il nuovo owner riprende accesso + switch ESISTENTI (quote già sigillate funzionano), ma deve ri-verificare i contatti di persona per armare NUOVI switch.
-- Questo è comportamento CORRETTO e VOLUTO: la verifica di persona non deve sopravvivere a un cambio device (altrimenti un server compromesso inietterebbe chiavi contatto false).
+Analysis of the actual code:
+- approve.tsx: the contact loads verifiedOwnerKey but uses it ONLY as an existence gate (if (!verifiedOwnerKey)); it does NOT compare it against the owner key from the server. Comment in the code (lines 29-30): "never uses the owner key from the push payload or from the server". The contact's operations (findMyShare with id.priv, decryption, submit) use their OWN private key, never the owner's.
+- p256.verify is not called by any client screen to validate owner signatures.
+- approvals.ts (server): approvals work by switchId and encrypted shares (addressed to the contact's key); the contact-owner link is by owner_id, IMMUTABLE across the rotation (only public_key changes).
 
-**Quadro finale del recovery:**
-1. Contatti dopo la rotazione: funzionano, nessun fix.
-2. Nuovo owner riprende accesso/switch: via login con B (stesso flusso authChallenge/authVerify del restore).
-3. Nuovo owner deve ri-verificare i contatti per armare NUOVI switch: corretto/voluto.
-4. Parte C (aggiornamento fiducia contatti): NON necessaria, ABBANDONATA.
+Consequence: after the A→B rotation, the contact keeps operating without any changes. No contact-side fix.
 
-**Fatto in questa sessione:**
-- /recovery/status (C.1) implementato poi RIMOSSO (non necessario). Commit 3522893.
-- C3 fase 2 chiusa con quorum DINAMICO invece di UI: recovery_k calcolato al finalize come min(n, max(2, ceil(n/2))) sui contatti attuali, con guardia n=0. users.recovery_k deprecata (inerte). Commit 3522893.
-- Parte A (initiate chiede ownerId) resta valida. Commit 6b4851e.
+Reinterpretation of the observed "wall": T1 could no longer arm because it had the OLD key A and the server now recognizes B as the owner. CORRECT behavior (the old device is no longer the owner), not a flaw.
 
-**Cosa resta (solo UX minori):**
-- Messaggio chiaro dopo il recovery: informare il nuovo owner che deve ri-verificare i contatti di persona per armare nuovi switch (non un errore criptico).
-- Avviso caso n=1 contatto: quorum=1 è poco sicuro (un solo contatto può avviare la rotazione); segnalarlo.
+**The REAL flaw (which also affects restore-from-seed on a new device):**
+- restore.tsx restores ownerId + switchId from the server (authVerify also returns switches), but does NOT restore verified_contact_keys (local in SecureStore, lost with the old device).
+- compose.tsx: to arm, a chosen contact must be in verifiedKeys (verified in person). On a new device it is EMPTY.
+- So the new owner regains access + EXISTING switches (already-sealed shares keep working), but must re-verify contacts in person to arm NEW switches.
+- This is CORRECT and INTENDED behavior: in-person verification must not survive a device change (otherwise a compromised server could inject fake contact keys).
 
-**Lezione di metodo:** l'analisi ad alto livello aveva ipotizzato un difetto ("i contatti si rompono") che la lettura del codice ha smentito. Leggere il codice prima di implementare ha evitato di costruire una Parte C complessa e inutile in un flusso di sicurezza. Meno superficie, non più.
+**Final picture of the recovery:**
+1. Contacts after the rotation: they work, no fix needed.
+2. New owner regains access/switches: via login with B (same authChallenge/authVerify flow as restore).
+3. New owner must re-verify contacts to arm NEW switches: correct/intended.
+4. Part C (contact trust update): NOT necessary, ABANDONED.
+
+**Done in this session:**
+- /recovery/status (C.1) implemented then REMOVED (not necessary). Commit 3522893.
+- C3 phase 2 closed with a DYNAMIC quorum instead of a UI: recovery_k computed at finalize as min(n, max(2, ceil(n/2))) over the current contacts, with an n=0 guard. users.recovery_k deprecated (inert). Commit 3522893.
+- Part A (initiate asks for the ownerId) remains valid. Commit 6b4851e.
+
+**What remains (minor UX only):**
+- Clear message after the recovery: inform the new owner that they must re-verify contacts in person to arm new switches (not a cryptic error).
+- Warning for the n=1 contact case: quorum=1 is weakly secure (a single contact can initiate the rotation); flag it.
+
+**Method lesson:** the high-level analysis had hypothesized a flaw ("the contacts break") that reading the code disproved. Reading the code before implementing avoided building a complex, useless Part C in a security flow. Less surface, not more.

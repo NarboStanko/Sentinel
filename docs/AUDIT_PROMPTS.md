@@ -1,85 +1,87 @@
-# Sentinella — Prompt per audit su modelli linguistici
+# Sentinella — Audit prompts for language models
 
-## Come usarli
+> 🇬🇧 English · [🇮🇹 Italiano](AUDIT_PROMPTS.it.md)
 
-**Un prompt per sessione, sessioni separate.** Un modello che ha già "assolto" il sistema in una risposta tende a restare coerente con sé stesso. Sessioni indipendenti danno giudizi indipendenti.
+## How to use them
 
-**Cosa consegnare all'inizio:** il codice, `THREAT_MODEL.md`, `CRYPTO_INVENTORY.md`.
+**One prompt per session, in separate sessions.** A model that has already "absolved" the system in one response tends to stay consistent with itself. Independent sessions yield independent judgments.
 
-**Cosa NON consegnare subito:** `DESIGN_DECISIONS.md`. Contiene le motivazioni delle scelte, e un modello che le legge tende ad accettarle invece di metterle in discussione. Consegnalo solo nella seconda fase, quando confronti le segnalazioni ricevute con il razionale: quelle che restano valide anche dopo aver letto le motivazioni sono le segnalazioni che contano.
+**What to hand over at the start:** the code, `THREAT_MODEL.md`, `CRYPTO_INVENTORY.md`.
 
-**Registra tutto.** Anche i falsi positivi: la frequenza con cui modelli diversi segnalano la stessa cosa è un segnale, anche quando la segnalazione è sbagliata.
+**What NOT to hand over right away:** `DESIGN_DECISIONS.md`. It contains the rationale behind the choices, and a model that reads it tends to accept them rather than challenge them. Hand it over only in the second phase, when you compare the findings you received against the rationale: the ones that remain valid even after reading the motivations are the findings that matter.
 
----
-
-## Prompt 1 — Attaccante con database
-
-> Hai ottenuto accesso in lettura e scrittura al database SQLite di questo server. Non hai le chiavi private di nessun utente. Il tuo obiettivo è alterare la storia degli eventi senza che l'utente possa accorgersene verificando la catena audit.
->
-> Elenca ogni azione che puoi compiere e per ciascuna indica se è rilevabile, da chi, e a quali condizioni. Dove trovi azioni non rilevabili, spiega la sequenza esatta.
->
-> Considera anche: eventi che il sistema non scrive affatto, eventi che può perdere, e finestre temporali in cui la catena è incompleta.
-
-## Prompt 2 — Distinguere il duress
-
-> Questo sistema ha un PIN di emergenza che, se digitato al posto di quello normale, attiva contromisure invisibili. Ci sono due modalità: una mostra dati fittizi senza contattare il server, l'altra avvia una procedura di rilascio in background mostrando i dati reali.
->
-> Sei un avversario che osserva il dispositivo mentre la vittima lo sblocca, e puoi anche esaminarlo successivamente. Trova ogni modo per distinguere uno sblocco con PIN di emergenza da uno sblocco normale.
->
-> Considera: tempi di risposta, traffico di rete, consumo, artefatti su disco, contenuto dell'APK, stato dell'interfaccia, comportamento dopo un riavvio, differenze nei log di sistema.
-
-## Prompt 3 — Canonicalizzazione e firme
-
-> Analizza la funzione di canonicalizzazione usata per firmare le richieste, presente in due implementazioni che devono produrre output identici (client e server).
->
-> Domande: esistono due payload semanticamente diversi che producono la stessa stringa canonica? La concatenazione con separatore è iniettabile tramite il contenuto dei campi? L'ordinamento è deterministico per tutti i tipi JSON, inclusi valori nulli, array annidati, chiavi con caratteri speciali, numeri in notazione diversa?
->
-> Costruisci un caso concreto di collisione se ne trovi uno.
-
-## Prompt 4 — Ciclo di vita delle chiavi
-
-> Traccia il percorso di ogni segreto in questa applicazione React Native: seed phrase, chiave privata di identità, chiave di cifratura del contenuto, quote di Shamir, PIN.
->
-> Per ciascuno: dove viene generato, con quale entropia, dove risiede in memoria, per quanto tempo, dove viene persistito, se viene azzerato dopo l'uso, e chi può leggerlo in quel percorso.
->
-> Indica dove il runtime JavaScript rende impossibile garantire l'azzeramento e quali sono le conseguenze pratiche.
-
-## Prompt 5 — Soglia di Shamir
-
-> Esamina l'implementazione della condivisione a soglia e della ricombinazione.
->
-> Verifica: la generazione dei coefficienti usa una sorgente crittograficamente sicura? L'aritmetica è su un campo finito corretto? La ricombinazione ha comportamenti dipendenti dai dati che potrebbero costituire un canale laterale? È possibile che k-1 quote rivelino informazione parziale sul segreto?
->
-> Verifica anche il caso degenere: cosa accade con quote malformate, duplicate, o con indici fuori intervallo.
-
-## Prompt 6 — Escalation sulle rotte
-
-> Questo server usa un middleware di autenticazione con quattro tipi di attore. Ogni rotta di scrittura dichiara quale tipo richiede.
->
-> Costruisci una matrice di tutte le rotte con il tipo di attore richiesto, e cerca: rotte dove il tipo è più permissivo del necessario, rotte dove la relazione tra attore e risorsa non viene verificata, percorsi in cui un contatto può agire su risorse di un owner diverso, o in cui un owner può agire su switch non suoi.
->
-> Verifica anche le rotte deliberatamente anonime: quali garanzie perdono e se esistono abusi possibili.
-
-## Prompt 7 — Il progettista sbagliato
-
-> Assumi che chi ha progettato questo sistema abbia commesso almeno tre errori concettuali significativi — non bug di implementazione, ma scelte architetturali che non reggono al modello di minaccia dichiarato.
->
-> Trovali. Per ciascuno spiega perché la scelta sembra ragionevole, perché non lo è, e cosa andrebbe fatto invece.
->
-> Non elencare buone pratiche generiche: cerca ciò che è sbagliato in questo sistema specifico.
-
-## Prompt 8 — Il caso reale
-
-> Una giornalista in un paese autoritario usa questo strumento. Ha materiale che comprometterebbe funzionari di governo. Ha configurato tre contatti fidati in tre paesi diversi, soglia 2, e un intervallo di check-in giornaliero.
->
-> Viene arrestata. Il suo telefono viene sequestrato e analizzato da un laboratorio forense. Gli inquirenti hanno risorse statali, tempo, e possono ottenere collaborazione dal fornitore del server e dal provider di storage.
->
-> Descrivi cosa possono ricostruire, cosa possono impedire, cosa non possono fare in nessun caso. Sii specifico su quale materiale ottengono da ciascuna fonte.
+**Log everything.** Even false positives: how often different models flag the same thing is a signal, even when the finding is wrong.
 
 ---
 
-## Cosa fare dopo
+## Prompt 1 — Attacker with the database
 
-Raccogli le segnalazioni in una tabella: descrizione, quale modello l'ha sollevata, gravità stimata, e se resta valida dopo aver letto `DESIGN_DECISIONS.md`.
+> You have obtained read and write access to this server's SQLite database. You do not have the private keys of any user. Your goal is to alter the history of events without the user being able to notice by verifying the audit chain.
+>
+> List every action you can perform and, for each, state whether it is detectable, by whom, and under what conditions. Where you find undetectable actions, explain the exact sequence.
+>
+> Also consider: events the system does not write at all, events it may lose, and time windows in which the chain is incomplete.
 
-Le segnalazioni che sopravvivono al confronto con il razionale sono quelle da portare all'audit professionale: risparmiano tempo al revisore e mostrano che il progetto ha già fatto un lavoro di autocritica.
+## Prompt 2 — Distinguishing duress
+
+> This system has a duress PIN that, if entered instead of the normal one, activates invisible countermeasures. There are two modes: one shows fake data without contacting the server, the other starts a release procedure in the background while showing the real data.
+>
+> You are an adversary observing the device while the victim unlocks it, and you can also examine it afterward. Find every way to distinguish a duress-PIN unlock from a normal unlock.
+>
+> Consider: response times, network traffic, power consumption, on-disk artifacts, APK contents, UI state, behavior after a reboot, differences in system logs.
+
+## Prompt 3 — Canonicalization and signatures
+
+> Analyze the canonicalization function used to sign requests, present in two implementations that must produce identical output (client and server).
+>
+> Questions: do two semantically different payloads exist that produce the same canonical string? Is the separator-based concatenation injectable through field contents? Is the ordering deterministic for all JSON types, including null values, nested arrays, keys with special characters, numbers in different notation?
+>
+> Construct a concrete collision case if you find one.
+
+## Prompt 4 — Key lifecycle
+
+> Trace the path of every secret in this React Native application: seed phrase, identity private key, content encryption key, Shamir shares, PIN.
+>
+> For each: where it is generated, with what entropy, where it resides in memory, for how long, where it is persisted, whether it is zeroed after use, and who can read it along that path.
+>
+> Point out where the JavaScript runtime makes it impossible to guarantee zeroing and what the practical consequences are.
+
+## Prompt 5 — Shamir threshold
+
+> Examine the implementation of threshold secret sharing and reconstruction.
+>
+> Verify: does coefficient generation use a cryptographically secure source? Is the arithmetic over a correct finite field? Does reconstruction have data-dependent behavior that could constitute a side channel? Is it possible for k-1 shares to reveal partial information about the secret?
+>
+> Also check the degenerate case: what happens with malformed shares, duplicates, or out-of-range indices.
+
+## Prompt 6 — Route escalation
+
+> This server uses an authentication middleware with four actor types. Every write route declares which type it requires.
+>
+> Build a matrix of all routes with the required actor type, and look for: routes where the type is more permissive than necessary, routes where the relationship between actor and resource is not verified, paths where a contact can act on a different owner's resources, or where an owner can act on switches that are not theirs.
+>
+> Also check the deliberately anonymous routes: what guarantees they give up and whether any abuse is possible.
+
+## Prompt 7 — The wrong designer
+
+> Assume that whoever designed this system made at least three significant conceptual errors — not implementation bugs, but architectural choices that do not hold up against the declared threat model.
+>
+> Find them. For each, explain why the choice seems reasonable, why it is not, and what should be done instead.
+>
+> Do not list generic best practices: look for what is wrong in this specific system.
+
+## Prompt 8 — The real case
+
+> A journalist in an authoritarian country uses this tool. She has material that would compromise government officials. She has configured three trusted contacts in three different countries, threshold 2, and a daily check-in interval.
+>
+> She is arrested. Her phone is seized and analyzed by a forensic lab. The investigators have state resources, time, and can obtain cooperation from the server provider and the storage provider.
+>
+> Describe what they can reconstruct, what they can prevent, what they can never do under any circumstances. Be specific about which material they obtain from each source.
+
+---
+
+## What to do next
+
+Collect the findings in a table: description, which model raised it, estimated severity, and whether it remains valid after reading `DESIGN_DECISIONS.md`.
+
+The findings that survive the comparison with the rationale are the ones to bring to the professional audit: they save the reviewer time and show that the project has already done a job of self-criticism.
