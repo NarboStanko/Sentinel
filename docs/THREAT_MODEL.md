@@ -1,168 +1,170 @@
-# Sentinella — Modello di minaccia
+# Sentinella — Threat model
 
-**Versione:** 1.0 · **Data:** luglio 2026 · **Stato del progetto:** prototipo funzionante, non ancora sottoposto ad audit indipendente
+> 🇬🇧 English · [🇮🇹 Italiano](THREAT_MODEL.it.md)
 
----
-
-## 1. Cos'è Sentinella
-
-Un *dead-man's switch* civico. L'utente (*owner*) prepara un pacchetto di contenuti cifrati e lo "arma" con un intervallo di check-in. Se l'owner non risponde ai check-in entro l'intervallo più un periodo di grazia, il sistema chiede ai *contatti fidati* dell'owner di approvare il rilascio. Raggiunto il quorum, i contatti ricombinano la chiave e accedono al contenuto.
-
-Caso d'uso di riferimento: una persona che detiene informazioni la cui pubblicazione è nell'interesse pubblico, e che vuole garantirne la diffusione qualora venga messa nell'impossibilità di agire.
-
-**Ciò che il sistema promette:**
-- Il server non può leggere i contenuti (cifratura end-to-end).
-- Il server non può rilasciare i contenuti da solo (serve il quorum dei contatti).
-- Il server non può alterare la cronologia degli eventi senza che sia rilevabile.
-- L'owner sotto coercizione ha due contromisure: una facciata di dati spuri e un trigger silenzioso.
+**Version:** 1.0 · **Date:** July 2026 · **Project status:** working prototype, not yet subjected to an independent audit
 
 ---
 
-## 2. Attori
+## 1. What Sentinella is
 
-| Attore | Descrizione | Fidato per |
+A civic *dead-man's switch*. The user (*owner*) prepares a package of encrypted content and "arms" it with a check-in interval. If the owner fails to answer the check-ins within the interval plus a grace period, the system asks the owner's *trusted contacts* to approve the release. Once the quorum is reached, the contacts recombine the key and access the content.
+
+Reference use case: a person who holds information whose publication is in the public interest, and who wants to guarantee its dissemination should they be rendered unable to act.
+
+**What the system promises:**
+- The server cannot read the content (end-to-end encryption).
+- The server cannot release the content on its own (the contacts' quorum is required).
+- The server cannot alter the event history without it being detectable.
+- The owner under coercion has two countermeasures: a decoy facade of fake data and a silent trigger.
+
+---
+
+## 2. Actors
+
+| Actor | Description | Trusted for |
 |---|---|---|
-| **Owner** | Chi prepara e arma il pacchetto | Sé stesso |
-| **Contatto fidato** | Persona accoppiata in presenza con l'owner, detiene una quota Shamir | Approvare il rilascio (solo in quorum) |
-| **Server** | Backend Node/Fastify + SQLite | Nulla di crittografico: coordina, non conosce chiavi né contenuti |
-| **Storage provider** | Google Drive dell'owner (o DevBlob in sviluppo) | Conservare byte opachi |
-| **Coercitore** | Chi ha accesso fisico all'owner e al suo dispositivo | — (avversario) |
+| **Owner** | Whoever prepares and arms the package | Themselves |
+| **Trusted contact** | Person paired in person with the owner, holds a Shamir share | Approving the release (only as part of a quorum) |
+| **Server** | Node/Fastify + SQLite backend | Nothing cryptographic: it coordinates, knows neither keys nor content |
+| **Storage provider** | The owner's Google Drive (or DevBlob in development) | Storing opaque bytes |
+| **Coercer** | Whoever has physical access to the owner and their device | — (adversary) |
 
 ---
 
-## 3. Minacce coperte
+## 3. Threats covered
 
-### 3.1 Server compromesso — passivo (lettura)
+### 3.1 Compromised server — passive (read)
 
-**Scenario:** un attaccante ottiene accesso in lettura al database e ai file del server (exploit, accesso fisico, insider).
+**Scenario:** an attacker gains read access to the server's database and files (exploit, physical access, insider).
 
-**Copertura:** i contenuti non transitano né risiedono sul server. Il server conserva puntatori a blob cifrati su storage esterno, quote Shamir cifrate per il destinatario, chiavi pubbliche. Nessun materiale segreto in chiaro.
+**Coverage:** the content neither transits through nor resides on the server. The server stores pointers to encrypted blobs on external storage, Shamir shares encrypted for their recipient, and public keys. No secret material in the clear.
 
-**Residuo:** metadati esposti. Chi è owner di chi, quanti contatti, quando è stato armato uno switch, i timestamp dei check-in. Il grafo sociale è visibile. **Non mitigato.**
+**Residual:** metadata exposed. Who is the owner of whom, how many contacts, when a switch was armed, the check-in timestamps. The social graph is visible. **Not mitigated.**
 
-### 3.2 Server compromesso — attivo (alterazione)
+### 3.2 Compromised server — active (tampering)
 
-**Scenario:** l'attaccante ha controllo in scrittura e vuole alterare la storia: cancellare eventi, inventarne, riordinarli.
+**Scenario:** the attacker has write control and wants to alter the history: delete events, fabricate them, reorder them.
 
-**Copertura:** catena di hash con eventi utente firmati (`audit_chain`). Ogni evento contiene l'hash del precedente; l'hash copre `chain_owner_id ‖ chain_index ‖ event_type ‖ actor_id ‖ canonical(payload) ‖ timestamp_ms ‖ signature ‖ prev_hash`. Le azioni dell'utente portano la firma P-256 dell'attore, che il server non può falsificare non avendo la chiave privata.
+**Coverage:** hash-linked chain with signed user events (`audit_chain`). Each event contains the hash of the previous one; the hash covers `chain_owner_id ‖ chain_index ‖ event_type ‖ actor_id ‖ canonical(payload) ‖ timestamp_ms ‖ signature ‖ prev_hash`. User actions carry the actor's P-256 signature, which the server cannot forge since it does not hold the private key.
 
-L'utente può salvare un *anchor* (hash dell'ultimo evento della propria catena) fuori dal sistema, e in seguito verificare che la catena ricostruita dal server corrisponda.
+The user can save an *anchor* (hash of the last event of their own chain) outside the system, and later verify that the chain reconstructed by the server matches.
 
-**Limite dichiarato:** il sistema **rileva**, non impedisce. Un attaccante con controllo del DB può cancellare o riscrivere; l'utente se ne accorge solo verificando contro un anchor salvato in precedenza. Senza anchor, un attaccante con tempo sufficiente può ricostruire una catena coerente dal genesis.
+**Declared limit:** the system **detects**, it does not prevent. An attacker with control of the DB can delete or rewrite; the user only notices by verifying against a previously saved anchor. Without an anchor, an attacker with enough time can rebuild a consistent chain from the genesis.
 
-### 3.3 Server che tenta il rilascio autonomo
+### 3.3 Server attempting an autonomous release
 
-**Scenario:** il server vuole far uscire i contenuti senza il consenso dei contatti.
+**Scenario:** the server wants to let the content out without the contacts' consent.
 
-**Copertura:** la chiave di cifratura del contenuto è divisa in quote Shamir (soglia k, minimo 2 per vincolo di prodotto). Le quote sono cifrate per la chiave pubblica di ciascun contatto: il server le trasporta senza poterle leggere. Servono k contatti che sottomettano la propria quota decifrata.
+**Coverage:** the content encryption key is split into Shamir shares (threshold k, minimum 2 as a product constraint). The shares are encrypted for each contact's public key: the server transports them without being able to read them. k contacts must submit their own decrypted share.
 
-**Residuo:** se k contatti sono compromessi o colludono, il rilascio avviene. È una proprietà del modello a soglia, non un difetto implementativo.
+**Residual:** if k contacts are compromised or collude, the release happens. This is a property of the threshold model, not an implementation flaw.
 
-### 3.4 Richieste non autenticate al server
+### 3.4 Unauthenticated requests to the server
 
-**Scenario:** un attaccante che conosce un `switch_id` tenta di disarmarlo, armarlo, aggiungere contenuti, sottomettere quote.
+**Scenario:** an attacker who knows a `switch_id` attempts to disarm it, arm it, add content, submit shares.
 
-**Copertura:** ogni rotta di scrittura richiede una firma P-256 su una canonicalizzazione deterministica di `(method, path, timestamp, chiave pubblica, body)`. Quattro tipi di attore (`owner`, `contact`, `owner-of-switch`, `contact-of-switch`) con lookup che verifica anche la relazione (es. che quel contatto appartenga all'owner di quello switch). Protezione replay via cache di nonce con finestra ±5 min e TTL 6 min.
+**Coverage:** every write route requires a P-256 signature over a deterministic canonicalization of `(method, path, timestamp, public key, body)`. Four actor types (`owner`, `contact`, `owner-of-switch`, `contact-of-switch`) with a lookup that also verifies the relationship (e.g. that the contact belongs to the owner of that switch). Replay protection via a nonce cache with a ±5 min window and a 6 min TTL.
 
-Il rate-limit sulle sottomissioni è per identità crittografica (`contact_id`), non per IP: due contatti dietro la stessa rete non si bloccano a vicenda.
+The rate-limit on submissions is per cryptographic identity (`contact_id`), not per IP: two contacts behind the same network do not block each other.
 
-Le quote già sottomesse non possono essere sovrascritte (`UPDATE ... AND submitted_share IS NULL`, tentativo registrato come `SHARE_OVERWRITE_ATTEMPTED`).
+Shares already submitted cannot be overwritten (`UPDATE ... AND submitted_share IS NULL`, the attempt is recorded as `SHARE_OVERWRITE_ATTEMPTED`).
 
-### 3.5 Coercizione fisica dell'owner
+### 3.5 Physical coercion of the owner
 
-**Scenario:** qualcuno costringe l'owner a sbloccare l'app.
+**Scenario:** someone forces the owner to unlock the app.
 
-**Copertura:** PIN di emergenza (*duress*), con due modalità alternative configurabili:
+**Coverage:** emergency PIN (*duress PIN*), with two alternative configurable modes:
 
-- **Modalità A — facciata.** L'app si sblocca mostrando dati spuri credibili (uno switch disarmato, contatti fittizi marcati come verificati). **Nessuna chiamata raggiunge il server**: un guard centrale intercetta ogni richiesta e restituisce un errore di rete plausibile. Lo stato facciata persiste in SecureStore, quindi resta coerente anche se il coercitore riavvia il dispositivo e fa risbloccare. Si esce solo sbloccando con il PIN normale; a quel punto l'app registra `DURESS_FACADE_TRIGGERED` e avvisa l'utente.
+- **Mode A — decoy facade.** The app unlocks showing credible fake data (a disarmed switch, fictitious contacts marked as verified). **No call reaches the server**: a central guard intercepts every request and returns a plausible network error. The facade state persists in SecureStore, so it remains consistent even if the coercer restarts the device and forces another unlock. The only way out is unlocking with the normal PIN; at that point the app records `DURESS_FACADE_TRIGGERED` and warns the user.
 
-- **Modalità B — trigger silenzioso.** L'app si sblocca mostrando i dati **reali**, indistinguibile da uno sblocco normale, mentre in background porta gli switch attivi in `APPROVAL_PENDING`, saltando la grazia. I contatti ricevono subito le richieste di approvazione. Il quorum resta necessario: il duress **avvia** il rilascio, non lo esegue.
+- **Mode B — silent trigger.** The app unlocks showing the **real** data, indistinguishable from a normal unlock, while in the background it moves the active switches into `APPROVAL_PENDING`, skipping the grace period. The contacts immediately receive the approval requests. The quorum remains necessary: duress **initiates** the release, it does not execute it.
 
-**Indistinguibilità:** entrambe le modalità usano lo stesso percorso di navigazione dello sblocco normale, azzerano il contatore di lockout come farebbe un PIN valido, e non producono messaggi, ritardi o segnali visibili. La schermata di sblocco non contiene alcun riferimento all'esistenza di un PIN di emergenza.
+**Indistinguishability:** both modes use the same navigation path as the normal unlock, reset the lock-out counter as a valid PIN would, and produce no messages, delays or visible signals. The unlock screen contains no reference whatsoever to the existence of an emergency PIN.
 
-**La biometria è esclusa dallo sblocco per scelta deliberata:** un'impronta è coercibile (basta prendere il dito), un PIN nella testa no. Se l'app si sbloccasse con l'impronta, il duress non scatterebbe mai.
+**Biometrics are excluded from unlocking by deliberate choice:** a fingerprint is coercible (it is enough to take the finger), a PIN in one's head is not. If the app could be unlocked with a fingerprint, duress would never trigger.
 
-**Vincoli sul PIN duress:** minimo 6 cifre, blacklist di 28 pattern comuni, diverso dal PIN di sblocco. Rate-limit di 3 trigger al giorno per owner.
+**Constraints on the duress PIN:** minimum 6 digits, blacklist of 28 common patterns, different from the unlock PIN. Rate-limit of 3 triggers per day per owner.
 
-### 3.6 Brute force sul dispositivo
+### 3.6 Brute force on the device
 
-**Copertura:** lockout esponenziale persistente (30s → 2min → 10min → 1h → 4h, tetto), che sopravvive alla chiusura dell'app. Reset dopo 24h senza tentativi falliti.
+**Coverage:** persistent exponential lock-out (30s → 2min → 10min → 1h → 4h, cap), which survives closing the app. Reset after 24h without failed attempts.
 
 ---
 
-## 4. Minacce NON coperte (dichiarate esplicitamente)
+## 4. Threats NOT covered (explicitly declared)
 
-| Minaccia | Perché non coperta |
+| Threat | Why not covered |
 |---|---|
-| **Malware sul dispositivo dell'owner** | Un attaccante con codice in esecuzione sul telefono legge SecureStore, la memoria, e osserva l'inserimento del PIN. Nessuna difesa possibile a questo livello. |
-| **Server + anchor entrambi compromessi** | Se l'attaccante controlla il server e l'utente non ha mai salvato un anchor esterno, può ricostruire una catena audit coerente e falsa. |
-| **Collusione di k contatti** | Proprietà del modello a soglia. La scelta di k è un compromesso tra disponibilità e resistenza alla collusione. |
-| **Coercizione dei contatti** | Un attaccante che costringe k contatti ad approvare ottiene il rilascio. I contatti non hanno un meccanismo duress. |
-| **Analisi forense del dispositivo** | La facciata regge un'ispezione superficiale sotto stress, non un'analisi tecnica: l'APK contiene il codice della facciata, e i dati reali sono presenti in SecureStore. |
-| **Metadati sul server** | Grafo dei contatti, tempistiche, frequenza d'uso sono in chiaro nel DB. |
-| **Compromissione dello storage provider** | Google può cancellare i blob (non leggerli: sono cifrati). Un blob cancellato rende il pacchetto irrecuperabile. |
-| **Denial of service sul server** | Se il server è offline, i check-in non arrivano e il ciclo si ferma. Rate-limit IP presente come secondo livello, ma non c'è ridondanza. |
+| **Malware on the owner's device** | An attacker with code running on the phone reads SecureStore, memory, and observes PIN entry. No defense is possible at this level. |
+| **Server + anchor both compromised** | If the attacker controls the server and the user has never saved an external anchor, they can rebuild a consistent, false audit chain. |
+| **Collusion of k contacts** | Property of the threshold model. The choice of k is a trade-off between availability and collusion resistance. |
+| **Coercion of the contacts** | An attacker who forces k contacts to approve obtains the release. Contacts have no duress mechanism. |
+| **Forensic analysis of the device** | The facade withstands a superficial inspection under stress, not a technical analysis: the APK contains the facade code, and the real data is present in SecureStore. |
+| **Metadata on the server** | Contact graph, timings, frequency of use are in the clear in the DB. |
+| **Compromise of the storage provider** | Google can delete the blobs (not read them: they are encrypted). A deleted blob makes the package unrecoverable. |
+| **Denial of service on the server** | If the server is offline, check-ins do not arrive and the cycle stops. IP rate-limit present as a second layer, but there is no redundancy. |
 
 ---
 
-## 5. Sottosistema pianificato: uscite verso attuatori
+## 5. Planned subsystem: outputs to actuators
 
-**Non implementato.** Documentato qui perché il design è stato deciso e introduce una superficie d'attacco propria, che l'auditor può voler considerare nel valutare l'architettura esistente.
+**Not implemented.** Documented here because the design has been decided and it introduces its own attack surface, which the auditor may want to consider when evaluating the existing architecture.
 
-**Cos'è:** un'uscita generica che, al rilascio, consegna un comando di attivazione a un dispositivo controllato dall'utente (Raspberry Pi, ESP32 o simile). La semantica dell'azione è a carico dell'utente: apertura di una serratura, avvio di una registrazione, sblocco di un contenitore. Sentinella fornisce il meccanismo di attivazione verificabile, non decide cosa attiva.
+**What it is:** a generic output that, upon release, delivers an activation command to a device controlled by the user (Raspberry Pi, ESP32 or similar). The semantics of the action are the user's responsibility: opening a lock, starting a recording, unlocking a container. Sentinella provides the verifiable activation mechanism, it does not decide what gets activated.
 
-**Principio di design:** l'attuatore non deve fidarsi né del server né della rete. Il segreto di attivazione risiede **dentro il pacchetto cifrato**, protetto dalla stessa soglia di Shamir dei contenuti, e cifrato per la chiave pubblica dell'attuatore. Diventa quindi disponibile solo dopo che k contatti hanno approvato e ricombinato la chiave. Il server trasporta un blob che non può leggere e non può fabbricare.
+**Design principle:** the actuator must trust neither the server nor the network. The activation secret resides **inside the encrypted package**, protected by the same Shamir threshold as the content, and encrypted for the actuator's public key. It therefore becomes available only after k contacts have approved and recombined the key. The server transports a blob it can neither read nor fabricate.
 
-**Proprietà che ne derivano:**
-- Un server compromesso non può azionare l'attuatore: non possiede il segreto.
-- Un'attivazione intercettata non è riutilizzabile (vedi anti-replay).
-- Nessun cloud di terze parti entra nel perimetro di fiducia.
+**Resulting properties:**
+- A compromised server cannot operate the actuator: it does not hold the secret.
+- An intercepted activation is not reusable (see anti-replay).
+- No third-party cloud enters the trust perimeter.
 
-**Decisioni prese:**
+**Decisions taken:**
 
-| Aspetto | Scelta | Motivazione |
+| Aspect | Choice | Rationale |
 |---|---|---|
-| Anti-replay | Contatore monotono persistente, nessuna scadenza temporale | Un microcontrollore senza RTC prende l'ora dalla rete: chi controlla la rete controlla la scadenza. Il contatore non richiede orologio. |
-| Attuatore offline al rilascio | L'attivazione resta pendente finché il dispositivo torna disponibile | Uno scenario di rilascio si verifica quando l'owner non può intervenire: perdere l'attivazione per un'interruzione di rete vanificherebbe la funzione. |
-| Arruolamento | Verifica in presenza con confronto di safety number, come per i contatti | Un'associazione via rete è soggetta a sostituzione della chiave pubblica dell'attuatore. |
-| Conferma | L'attuatore firma un'attestazione di esecuzione che entra nella catena audit | Senza, non è possibile sapere se l'azione fisica è avvenuta. |
-| Modalità di prova | Flag di simulazione sul dispositivo: registra invece di azionare | Rende i test non distruttivi. |
-| Partecipazione al trigger duress | Configurabile dall'utente in fase di setup | Se l'attuatore risponde al duress, un coercitore che conosce il meccanismo ha un incentivo a forzarne l'uso. La scelta è dell'utente, informata. |
+| Anti-replay | Persistent monotonic counter, no time-based expiry | A microcontroller without an RTC takes its time from the network: whoever controls the network controls the expiry. The counter requires no clock. |
+| Actuator offline at release | The activation stays pending until the device becomes available again | A release scenario occurs when the owner cannot intervene: losing the activation to a network outage would defeat the feature. |
+| Enrollment | In-person verification with safety number comparison, as for contacts | A network-based association is subject to substitution of the actuator's public key. |
+| Confirmation | The actuator signs an execution attestation that enters the audit chain | Without it, there is no way to know whether the physical action took place. |
+| Test mode | Simulation flag on the device: it logs instead of acting | Makes tests non-destructive. |
+| Participation in the duress trigger | User-configurable during setup | If the actuator responds to duress, a coercer who knows the mechanism has an incentive to force its use. The choice is the user's, informed. |
 
-**Rischi noti del sottosistema:**
-- Il contatore anti-replay deve sopravvivere allo spegnimento: su microcontrollori richiede scrittura in memoria non volatile, con attenzione ai cicli di scrittura.
-- L'endpoint server che consegna i blob di attivazione non deve consentire di enumerare quali owner possiedono attuatori.
-- Un attuatore compromesso fisicamente può essere impedito di agire (negazione del servizio) o azionato in un momento diverso da quello previsto.
-- Un'attivazione pendente per un tempo indefinito può scattare in un contesto radicalmente cambiato rispetto a quello in cui è stata autorizzata.
-
----
-
-## 6. Superficie crittografica
-
-Rimando a `CRYPTO_INVENTORY.md` per l'elenco puntuale di primitive, parametri e punti d'uso.
-
-Sintesi: firme su curva P-256 per l'autenticazione delle richieste e degli eventi audit; condivisione a soglia di Shamir per la chiave di contenuto; cifratura simmetrica autenticata per i contenuti; SHA-256 per la catena audit; derivazione con salt per i PIN in SecureStore.
+**Known risks of the subsystem:**
+- The anti-replay counter must survive power-off: on microcontrollers this requires writing to non-volatile memory, with attention to write cycles.
+- The server endpoint delivering the activation blobs must not allow enumerating which owners have actuators.
+- A physically compromised actuator can be prevented from acting (denial of service) or operated at a time other than the intended one.
+- An activation pending for an indefinite time may fire in a context radically different from the one in which it was authorized.
 
 ---
 
-## 7. Domande che ci si aspetta dall'audit
+## 6. Cryptographic surface
 
-Le aree su cui si richiede attenzione prioritaria:
+See `CRYPTO_INVENTORY.md` for the itemized list of primitives, parameters and points of use.
 
-1. **Ricombinazione Shamir** — l'implementazione è priva di leak temporali o di canali laterali? La generazione delle quote usa entropia adeguata?
-2. **Ciclo di vita delle chiavi** — le chiavi in chiaro vengono azzerate in memoria dopo l'uso? Quanto persistono nel runtime JavaScript?
-3. **Canonicalizzazione** — l'ordinamento ricorsivo produce serializzazioni deterministiche e non ambigue? Esistono payload che collidono?
-4. **Indistinguibilità del duress** — esistono canali laterali osservabili (timing, traffico di rete, consumo, artefatti su disco) che distinguono uno sblocco duress da uno normale?
-5. **Catena audit** — la costruzione dell'hash è priva di ambiguità di concatenazione? Il separatore `|` può essere iniettato tramite payload?
-6. **Best-effort dell'audit** — le scritture in catena non sono transazionali con l'azione principale: quali eventi si possono perdere e con quali conseguenze?
-7. **Modello di autenticazione** — i quattro tipi di attore coprono tutte le rotte con la granularità corretta? Esistono percorsi di escalation?
+Summary: P-256 curve signatures for authenticating requests and audit events; Shamir threshold sharing for the content key; authenticated symmetric encryption for the content; SHA-256 for the audit chain; salted derivation for the PINs in SecureStore.
 
 ---
 
-## 8. Stato e limiti dichiarati
+## 7. Questions expected from the audit
 
-- **242 test automatici** lato server, tutti verdi. Coprono autenticazione, rate-limit, catena audit, hardening, duress lato server.
-- **Testato end-to-end su dispositivi fisici** con build di produzione: pairing in presenza, armo, quorum, rilascio, decifratura, entrambe le modalità duress.
-- **Non testato:** quorum con download da Google Drive (richiede un terzo dispositivo); durata reale (switch armati per settimane); comportamento delle notifiche push dopo lunga inattività.
-- **Il server gira in HTTP** su rete locale in fase di sviluppo. Il deploy in produzione richiede HTTPS (Let's Encrypt) e la rimozione della configurazione che consente traffico in chiaro verso l'IP di sviluppo.
-- **Nessun audit indipendente è stato svolto.** Il sistema non deve essere usato da persone in situazioni di rischio reale prima che ciò avvenga.
+The areas where priority attention is requested:
+
+1. **Shamir recombination** — is the implementation free of timing leaks or side channels? Does share generation use adequate entropy?
+2. **Key lifecycle** — are cleartext keys zeroed in memory after use? How long do they persist in the JavaScript runtime?
+3. **Canonicalization** — does the recursive ordering produce deterministic and unambiguous serializations? Are there colliding payloads?
+4. **Duress indistinguishability** — are there observable side channels (timing, network traffic, power consumption, on-disk artifacts) that distinguish a duress unlock from a normal one?
+5. **Audit chain** — is the hash construction free of concatenation ambiguities? Can the `|` separator be injected via payload?
+6. **Best-effort audit** — chain writes are not transactional with the main action: which events can be lost and with what consequences?
+7. **Authentication model** — do the four actor types cover all routes with the correct granularity? Are there escalation paths?
+
+---
+
+## 8. Status and declared limits
+
+- **242 automated tests** server-side, all green. They cover authentication, rate-limit, audit chain, hardening, server-side duress.
+- **Tested end-to-end on physical devices** with production builds: in-person pairing, arming, quorum, release, decryption, both duress modes.
+- **Not tested:** quorum with download from Google Drive (requires a third device); real duration (switches armed for weeks); push notification behavior after long inactivity.
+- **The server runs over HTTP** on the local network during development. Production deployment requires HTTPS (Let's Encrypt) and the removal of the configuration that allows cleartext traffic to the development IP.
+- **No independent audit has been performed.** The system must not be used by people in situations of real risk before that happens.

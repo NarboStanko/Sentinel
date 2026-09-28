@@ -12,6 +12,12 @@ e il plugin `"./plugins/withNetworkSecurityConfig"` da `app.json`.
 Se l'IP del server di sviluppo cambia, aggiornare sia `app.json`
 (`extra.serverUrl`) sia `network-security-config.xml`.
 
+Sostituire `DEV_SERVER_IP` in `app.json` (`extra.serverUrl`) con l'IP del server di
+sviluppo sulla propria LAN. `network-security-config.xml` NON usa il placeholder:
+l'elemento `<domain>` Android richiede un IP/hostname reale (un placeholder non
+corrisponderebbe a nulla e il cleartext verrebbe bloccato), quindi va adattato a
+mano con lo stesso IP.
+
 NON usare `usesCleartextTraffic: true` globale — aprirebbe il cleartext verso
 qualsiasi host, violando i requisiti di sicurezza del progetto.
 

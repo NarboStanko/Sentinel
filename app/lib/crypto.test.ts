@@ -290,6 +290,6 @@ console.log('    1) Nessuna alternativa con audit pubblico indipendente disponib
 console.log('    2) Codice compatto e verificabile a mano contro le tabelle GF(256)');
 console.log('    3) Questa suite copre: vettori fissi, proprietà soglia, sub-soglia,');
 console.log('       lunghezze multiple, pool misto con esche.');
-console.log('  PRE-PRODUZIONE: commissioning audit esterno obbligatorio (CLAUDE.md).');
+console.log('  PRE-PRODUZIONE: audit di sicurezza esterno obbligatorio (vedi docs/REVIEWER_README.md).');
 
 process.exit(fail ? 1 : 0);
