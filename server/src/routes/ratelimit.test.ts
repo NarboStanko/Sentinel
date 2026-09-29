@@ -1,10 +1,15 @@
 // Test suite: rate limiting su /approval/submit e IP globale
 // Esegui con: npm run test:ratelimit
+export {};
 
 process.env['DB_PATH'] = ':memory:';
 
 const { default: Fastify } = await import('fastify');
-const { ok, equal } = await import('node:assert/strict');
+const assertStrict = await import('node:assert/strict');
+// Le assertion functions (`asserts value`) richiedono un'annotazione di tipo esplicita
+// sul binding (TS2775): stesse funzioni, tipizzate.
+const ok: typeof assertStrict.ok = assertStrict.ok;
+const equal: typeof assertStrict.equal = assertStrict.equal;
 const { db } = await import('../db.js');
 const { approvalRoutes } = await import('../routes/approvals.js');
 const { registerIpRateLimitHook } = await import('../services/rateLimiter.js');
